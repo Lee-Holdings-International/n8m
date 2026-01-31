@@ -1,0 +1,509 @@
+{
+  "name": "Cyber-Dark Automation Platform",
+  "version": "1.0.0",
+  "description": "Design tokens for developer-focused automation platform",
+  "colors": {
+    "primary": {
+      "value": "#10B981",
+      "description": "Emerald Green - Primary brand color",
+      "usage": "Primary actions, active states, key UI elements"
+    },
+    "primaryForeground": {
+      "value": "#0F172A",
+      "description": "Text color on primary background"
+    },
+    "secondary": {
+      "value": "#6366F1",
+      "description": "Indigo - Secondary brand color",
+      "usage": "Secondary actions, complementary elements"
+    },
+    "secondaryForeground": {
+      "value": "#FFFFFF",
+      "description": "Text color on secondary background"
+    },
+    "background": {
+      "value": "#0F172A",
+      "description": "Deep Slate - Main background color",
+      "usage": "Page background, main container"
+    },
+    "foreground": {
+      "value": "#F1F5F9",
+      "description": "Primary text color"
+    },
+    "card": {
+      "value": "#1E293B",
+      "description": "Card background color",
+      "usage": "Elevated surfaces, cards, panels"
+    },
+    "cardForeground": {
+      "value": "#F1F5F9",
+      "description": "Text color on card background"
+    },
+    "popover": {
+      "value": "#1E293B",
+      "description": "Popover background color"
+    },
+    "popoverForeground": {
+      "value": "#F1F5F9",
+      "description": "Text color on popover background"
+    },
+    "muted": {
+      "value": "#334155",
+      "description": "Muted background color",
+      "usage": "Disabled states, subtle backgrounds"
+    },
+    "mutedForeground": {
+      "value": "#94A3B8",
+      "description": "Muted text color",
+      "usage": "Secondary text, descriptions, hints"
+    },
+    "accent": {
+      "value": "#475569",
+      "description": "Accent background color",
+      "usage": "Hover states, highlights"
+    },
+    "accentForeground": {
+      "value": "#F1F5F9",
+      "description": "Text color on accent background"
+    },
+    "border": {
+      "value": "#334155",
+      "description": "Default border color"
+    },
+    "input": {
+      "value": "#1E293B",
+      "description": "Input field background"
+    },
+    "ring": {
+      "value": "#10B981",
+      "description": "Focus ring color"
+    },
+    "semantic": {
+      "success": {
+        "value": "#10B981",
+        "description": "Success state color - Emerald",
+        "usage": "Success messages, completed states"
+      },
+      "successForeground": {
+        "value": "#0F172A",
+        "description": "Text on success background"
+      },
+      "warning": {
+        "value": "#F59E0B",
+        "description": "Warning state color - Amber",
+        "usage": "Warning messages, cautionary states"
+      },
+      "warningForeground": {
+        "value": "#0F172A",
+        "description": "Text on warning background"
+      },
+      "error": {
+        "value": "#EF4444",
+        "description": "Error state color - Red",
+        "usage": "Error messages, failed states"
+      },
+      "errorForeground": {
+        "value": "#FFFFFF",
+        "description": "Text on error background"
+      },
+      "aiProcessing": {
+        "value": "#A855F7",
+        "description": "AI Processing state - Pulsing Purple",
+        "usage": "AI operations, processing states, agentic actions"
+      },
+      "aiProcessingForeground": {
+        "value": "#FFFFFF",
+        "description": "Text on AI processing background"
+      }
+    },
+    "sidebar": {
+      "background": {
+        "value": "#1E293B",
+        "description": "Sidebar background color"
+      },
+      "foreground": {
+        "value": "#F1F5F9",
+        "description": "Sidebar text color"
+      },
+      "primary": {
+        "value": "#10B981",
+        "description": "Sidebar active item background"
+      },
+      "primaryForeground": {
+        "value": "#0F172A",
+        "description": "Sidebar active item text"
+      },
+      "accent": {
+        "value": "#334155",
+        "description": "Sidebar hover background"
+      },
+      "accentForeground": {
+        "value": "#F1F5F9",
+        "description": "Sidebar hover text"
+      },
+      "border": {
+        "value": "#334155",
+        "description": "Sidebar border color"
+      },
+      "ring": {
+        "value": "#10B981",
+        "description": "Sidebar focus ring"
+      }
+    },
+    "chart": {
+      "chart1": {
+        "value": "#10B981",
+        "description": "Chart color 1 - Emerald"
+      },
+      "chart2": {
+        "value": "#6366F1",
+        "description": "Chart color 2 - Indigo"
+      },
+      "chart3": {
+        "value": "#A855F7",
+        "description": "Chart color 3 - Purple"
+      },
+      "chart4": {
+        "value": "#F59E0B",
+        "description": "Chart color 4 - Amber"
+      },
+      "chart5": {
+        "value": "#EF4444",
+        "description": "Chart color 5 - Red"
+      }
+    }
+  },
+  "typography": {
+    "fontFamily": {
+      "mono": {
+        "value": "'JetBrains Mono', monospace",
+        "description": "Monospace font for code and terminal elements"
+      },
+      "ui": {
+        "value": "'Inter', system-ui, -apple-system, sans-serif",
+        "description": "UI font for labels, body text, and interface elements"
+      }
+    },
+    "fontSize": {
+      "xs": {
+        "value": "0.75rem",
+        "pixels": "12px"
+      },
+      "sm": {
+        "value": "0.875rem",
+        "pixels": "14px"
+      },
+      "base": {
+        "value": "1rem",
+        "pixels": "16px"
+      },
+      "lg": {
+        "value": "1.125rem",
+        "pixels": "18px"
+      },
+      "xl": {
+        "value": "1.25rem",
+        "pixels": "20px"
+      },
+      "2xl": {
+        "value": "1.5rem",
+        "pixels": "24px"
+      }
+    },
+    "fontWeight": {
+      "normal": {
+        "value": "400",
+        "description": "Regular weight for body text"
+      },
+      "medium": {
+        "value": "500",
+        "description": "Medium weight for labels and buttons"
+      },
+      "semibold": {
+        "value": "600",
+        "description": "Semibold weight for emphasis"
+      },
+      "bold": {
+        "value": "700",
+        "description": "Bold weight for strong emphasis"
+      }
+    },
+    "lineHeight": {
+      "tight": {
+        "value": "1.3",
+        "description": "Tight line height for headings"
+      },
+      "normal": {
+        "value": "1.4",
+        "description": "Normal line height for subheadings"
+      },
+      "relaxed": {
+        "value": "1.5",
+        "description": "Relaxed line height for body text"
+      }
+    }
+  },
+  "spacing": {
+    "description": "8px base unit system for tight, efficient spacing to maximize data density",
+    "baseUnit": "8px",
+    "scale": {
+      "1": {
+        "value": "0.5rem",
+        "pixels": "8px",
+        "multiplier": "1x"
+      },
+      "2": {
+        "value": "1rem",
+        "pixels": "16px",
+        "multiplier": "2x"
+      },
+      "3": {
+        "value": "1.5rem",
+        "pixels": "24px",
+        "multiplier": "3x"
+      },
+      "4": {
+        "value": "2rem",
+        "pixels": "32px",
+        "multiplier": "4x"
+      },
+      "5": {
+        "value": "2.5rem",
+        "pixels": "40px",
+        "multiplier": "5x"
+      },
+      "6": {
+        "value": "3rem",
+        "pixels": "48px",
+        "multiplier": "6x"
+      }
+    }
+  },
+  "borderRadius": {
+    "description": "4px base border radius for minimal, modern aesthetic",
+    "sm": {
+      "value": "0.25rem",
+      "pixels": "4px",
+      "usage": "Small elements, badges, pills"
+    },
+    "md": {
+      "value": "0.375rem",
+      "pixels": "6px",
+      "usage": "Medium elements, inputs"
+    },
+    "lg": {
+      "value": "0.5rem",
+      "pixels": "8px",
+      "usage": "Large elements, cards"
+    },
+    "xl": {
+      "value": "0.75rem",
+      "pixels": "12px",
+      "usage": "Extra large elements"
+    },
+    "full": {
+      "value": "9999px",
+      "description": "Fully rounded (pills, circles)"
+    }
+  },
+  "shadows": {
+    "description": "Minimal shadows for high-contrast readability",
+    "sm": {
+      "value": "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
+      "usage": "Subtle elevation"
+    },
+    "md": {
+      "value": "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+      "usage": "Medium elevation"
+    },
+    "lg": {
+      "value": "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+      "usage": "High elevation"
+    },
+    "glow": {
+      "emerald": {
+        "value": "0 0 20px rgba(16, 185, 129, 0.3)",
+        "usage": "Agentic action button glow effect"
+      },
+      "purple": {
+        "value": "0 0 16px rgba(168, 85, 247, 0.4)",
+        "usage": "AI processing glow effect"
+      }
+    }
+  },
+  "animation": {
+    "duration": {
+      "fast": {
+        "value": "150ms",
+        "usage": "Quick transitions, button clicks"
+      },
+      "normal": {
+        "value": "200ms",
+        "usage": "Standard transitions"
+      },
+      "slow": {
+        "value": "300ms",
+        "usage": "Deliberate transitions, complex animations"
+      },
+      "pulse": {
+        "value": "2000ms",
+        "usage": "Pulsing effects for AI processing"
+      }
+    },
+    "easing": {
+      "default": {
+        "value": "ease-in-out",
+        "usage": "Standard easing"
+      },
+      "in": {
+        "value": "ease-in",
+        "usage": "Entrance animations"
+      },
+      "out": {
+        "value": "ease-out",
+        "usage": "Exit animations"
+      }
+    }
+  },
+  "breakpoints": {
+    "description": "Responsive breakpoints for mobile-first design",
+    "mobile": {
+      "value": "0px",
+      "max": "639px",
+      "description": "Mobile devices (default)"
+    },
+    "tablet": {
+      "value": "640px",
+      "max": "1023px",
+      "description": "Tablets and small laptops (sm breakpoint)"
+    },
+    "desktop": {
+      "value": "1024px",
+      "max": "1279px",
+      "description": "Desktop screens (md/lg breakpoint)"
+    },
+    "wide": {
+      "value": "1280px",
+      "description": "Wide desktop screens (xl breakpoint)"
+    }
+  },
+  "componentTokens": {
+    "description": "Component-specific design tokens",
+    "button": {
+      "minHeight": "44px",
+      "padding": "0.5rem 1rem",
+      "borderRadius": "4px",
+      "fontWeight": 500,
+      "focusRing": "2px solid var(--ring)",
+      "transition": "200ms",
+      "touchTarget": "44x44px minimum for accessibility"
+    },
+    "input": {
+      "paddingX": "1rem",
+      "paddingY": "0.5rem",
+      "background": "#1E293B",
+      "border": "#334155",
+      "focusRing": "#10B981"
+    },
+    "badge": {
+      "paddingX": "0.625rem",
+      "paddingY": "0.125rem",
+      "fontSize": "0.75rem",
+      "borderRadius": "9999px",
+      "variants": {
+        "active": {
+          "background": "rgba(16, 185, 129, 0.2)",
+          "foreground": "#10B981",
+          "border": "rgba(16, 185, 129, 0.5)"
+        },
+        "draft": {
+          "background": "rgba(51, 65, 85, 0.2)",
+          "foreground": "#94A3B8",
+          "border": "#334155"
+        },
+        "paused": {
+          "background": "rgba(245, 158, 11, 0.2)",
+          "foreground": "#F59E0B",
+          "border": "rgba(245, 158, 11, 0.5)"
+        },
+        "failed": {
+          "background": "rgba(239, 68, 68, 0.2)",
+          "foreground": "#EF4444",
+          "border": "rgba(239, 68, 68, 0.5)"
+        },
+        "processing": {
+          "background": "rgba(168, 85, 247, 0.2)",
+          "foreground": "#A855F7",
+          "border": "rgba(168, 85, 247, 0.5)",
+          "effect": "pulse-glow"
+        }
+      }
+    },
+    "sidebar": {
+      "width": "4rem",
+      "itemSize": "2.5rem",
+      "gap": "1rem",
+      "padding": "1.5rem",
+      "desktop": {
+        "width": "4rem",
+        "itemSize": "2.5rem",
+        "padding": "1.5rem",
+        "gap": "1rem",
+        "description": "Vertical sidebar with icon-based navigation"
+      },
+      "mobile": {
+        "height": "4rem",
+        "position": "bottom",
+        "minTouchTarget": "56x56px",
+        "padding": "0px",
+        "itemPadding": "0.75rem vertical",
+        "layout": "flex-1 equal distribution",
+        "activeState": "Full background fill edge-to-edge with primary color",
+        "focusRing": "0px offset for compact appearance",
+        "description": "Bottom navigation bar with edge-to-edge active states, no margins or gaps between items"
+      }
+    },
+    "terminalCard": {
+      "headerHeight": "2.5rem",
+      "minHeight": "200px",
+      "maxHeight": "400px",
+      "padding": "1rem",
+      "controlSize": "10px"
+    },
+    "logo": {
+      "description": "Brand logo component built entirely from design tokens",
+      "sizes": {
+        "sm": {
+          "container": "2rem",
+          "icon": "16px",
+          "gap": "0.5rem"
+        },
+        "md": {
+          "container": "3rem",
+          "icon": "24px",
+          "gap": "0.75rem"
+        },
+        "lg": {
+          "container": "4rem",
+          "icon": "32px",
+          "gap": "1rem"
+        }
+      },
+      "colors": {
+        "iconBackground": "rgba(16, 185, 129, 0.2)",
+        "iconBorder": "#10B981",
+        "icon": "#10B981",
+        "text": "#F1F5F9",
+        "subtext": "#94A3B8"
+      },
+      "borderRadius": "4px",
+      "borderWidth": "2px",
+      "typography": {
+        "fontFamily": "'Inter', system-ui, -apple-system, sans-serif",
+        "fontWeight": 600,
+        "lineHeight": 1.3
+      },
+      "usage": "Use the Logo component with design tokens for consistent brand representation. Available in three sizes (sm, md, lg) with optional text label."
+    }
+  }
+}

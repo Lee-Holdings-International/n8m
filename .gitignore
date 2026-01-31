@@ -1,0 +1,21 @@
+node_modules
+dist
+*.log
+.DS_Store
+oclif.manifest.json
+.tsbuildinfo
+
+# Sensitive data
+.env
+.env.*
+!.env.example
+
+# Tooling
+.agent
+.gemini
+.vercel
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
