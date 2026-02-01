@@ -7,6 +7,8 @@ import { AIService } from '../services/ai.service.js';
 import * as util from 'util';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { existsSync } from 'fs';
+
 export default class Test extends Command {
   static args = {
     workflow: Args.string({
@@ -27,11 +29,23 @@ export default class Test extends Command {
       default: false,
       description: 'Do not delete workflow if test fails',
     }),
+    'no-brand': Flags.boolean({
+      default: false,
+      hidden: true,
+      description: 'Suppress branding header',
+    }),
+    'validate-only': Flags.boolean({
+      default: false,
+      hidden: true,
+      description: 'Execute test but do not prompt for deploy/save actions',
+    }),
   }
 
   async run(): Promise<void> {
-    this.log(theme.brand());
     const {args, flags} = await this.parse(Test)
+    if (!flags['no-brand']) {
+        this.log(theme.brand());
+    }
 
     this.log(theme.header('EPHEMERAL VALIDATION'));
 
@@ -47,604 +61,505 @@ export default class Test extends Command {
     const client = new N8nClient({ apiUrl: n8nUrl, apiKey: n8nKey });
     let createdWorkflowId: string | null = null;
     const deployedDefinitions = new Map<string, any>(); // TempId -> Original JSON (for patching)
+    let globalSuccess = false;
 
     try {
       let workflowData: any;
       let workflowName = 'Untitled';
+      let rootRealTargetId: string | undefined = undefined;
 
-      if (args.workflow) {
-          this.log(theme.agent(`Initializing virtual orchestrator for ${theme.value(args.workflow)}`));
+      const dependencyMap = new Map<string, { name: string, data: any }>();
+      const visited = new Set<string>();
+      const resolutionMap = new Map<string, string>(); 
+      let workflowChoices: any[] = [];
+
+      const fetchDependencies = async (id: string, contextNodeName: string = 'Unknown') => {
+          const realId = resolutionMap.get(id) || id;
+          if (visited.has(realId)) return;
+          visited.add(realId);
+
+          let wf: any;
+
+          // 1. Check local filesystem FIRST (prioritize local over instance)
+          let localPath = '';
+          const searchDirs = [
+              ...(args.workflow ? [path.dirname(args.workflow)] : []),
+              path.join(process.cwd(), 'workflows'),
+              process.cwd()
+          ];
           
-          // Check if it's a file path
-          if (!args.workflow.endsWith('.json')) {
-              this.error('Local JSON path required.');
+          const sanitized = id.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+          const candidates = [];
+          for (const dir of searchDirs) {
+              candidates.push(path.join(dir, `${id}.json`));
+              candidates.push(path.join(dir, `${sanitized}.json`));
+              candidates.push(path.join(dir, `${id.replace(/\s+/g, '-')}.json`));
           }
           
-          const fs = await import('node:fs/promises');
-          const content = await fs.readFile(args.workflow, 'utf-8');
-          workflowData = JSON.parse(content);
-          workflowName = workflowData.name || 'Untitled';
-      } else {
-          this.log(theme.info('Fetching workflows from instance...'));
-          const workflows = await client.getWorkflows();
-          
-          // this.log('DEBUG: Fetched workflows:', JSON.stringify(workflows, null, 2));
-          
-          if (workflows.length === 0) {
-              this.error('No workflows found on instance.');
-          }
-
-          this.log(theme.info(`Found ${workflows.length} workflows.`));
-
-          const choices = workflows
-            .filter(w => !w.name.startsWith('[TEST'))
-            .map(w => ({
-                name: `${w.name} (${w.id}) ${w.active ? '[Active]' : ''}`,
-                value: w.id
-            }));
-
-          // this.log('DEBUG: Choices:', JSON.stringify(choices, null, 2));
-
-          const { selectedWorkflowId } = await inquirer.prompt([
-              {
-                  type: 'select',
-                  name: 'selectedWorkflowId',
-                  message: 'Select a workflow to test:',
-                  choices: choices,
-                  pageSize: 15
+          for (const candidate of candidates) {
+              if (existsSync(candidate)) {
+                  localPath = candidate;
+                  break;
               }
-          ]);
+          }
 
-          this.log(theme.agent(`Tracing dependencies for ${theme.value(selectedWorkflowId)}...`));
-          
-          // Dependency Resolution Map: originalId -> { name, data, tempId? }
-          const dependencyMap = new Map<string, { name: string, data: any }>();
-          const visited = new Set<string>();
-          // Map broken/placeholder IDs to Real IDs selected by user
-          const resolutionMap = new Map<string, string>(); 
+          if (localPath) {
+              this.log(theme.agent(`Found local dependency for ${theme.value(id)} at ${theme.value(localPath)}`));
+              const content = await fs.readFile(localPath, 'utf-8');
+              wf = JSON.parse(content);
+          } else {
+              // Case-insensitive search in workflows/
+              const workflowsDir = path.join(process.cwd(), 'workflows');
+              if (existsSync(workflowsDir)) {
+                  const files = await fs.readdir(workflowsDir);
+                  const match = files.find(f => f.toLowerCase() === `${sanitized}.json` || f.toLowerCase() === `${id.toLowerCase()}.json`);
+                  if (match) {
+                     localPath = path.join(workflowsDir, match);
+                     this.log(theme.agent(`Found local match for ${theme.value(id)}: ${theme.value(localPath)}`));
+                     const content = await fs.readFile(localPath, 'utf-8');
+                     wf = JSON.parse(content);
+                  } else if (id.toUpperCase().includes('SUBWORKFLOW') || id.toUpperCase().includes('ID')) {
+                      // FUZZY MATCH: If it's a generic placeholder, look for ANY newly created workflow in the same dir
+                      const dir = args.workflow ? path.dirname(args.workflow) : workflowsDir;
+                      const dirFiles = await fs.readdir(dir);
+                      const jsonFiles = dirFiles.filter(f => f.endsWith('.json') && !f.includes(path.basename(args.workflow || '')));
+                      if (jsonFiles.length === 1) {
+                          localPath = path.join(dir, jsonFiles[0]);
+                          this.log(theme.agent(`Fuzzy matched placeholder ${theme.value(id)} to ${theme.value(localPath)}`));
+                          const content = await fs.readFile(localPath, 'utf-8');
+                          wf = JSON.parse(content);
+                      }
+                  }
+              }
+          }
 
-          // Recursive function to fetch dependencies
-          const fetchDependencies = async (id: string, contextNodeName: string = 'Unknown') => {
-              // Be careful with resolution map - avoid double visiting
-              const realId = resolutionMap.get(id) || id;
-              
-              if (visited.has(realId)) return;
-              visited.add(realId);
-
-              let wf: any;
+          // 2. If not local, try fetching from instance
+          if (!wf) {
               try {
                   wf = await client.getWorkflow(realId) as any;
               } catch (e) {
-                  // Not found? Ask user to resolve!
                   this.log(theme.warn(`Dependency ${theme.value(id)} referenced in node [${contextNodeName}] could not be found.`));
-                  
+                  if (workflowChoices.length === 0) {
+                      const workflowsList = await client.getWorkflows();
+                      workflowChoices = workflowsList.map(w => ({ name: w.name, value: w.id }));
+                  }
                   const { resolvedId } = await inquirer.prompt([{
                       type: 'select',
                       name: 'resolvedId',
                       message: `Select replacement for missing dependency ${id}:`,
-                      choices: choices, // Use hoisted choices from earlier
+                      choices: workflowChoices,
                       pageSize: 15
                   }]);
-
                   resolutionMap.set(id, resolvedId);
-                  
-                  // Retry fetch with resolved ID
                   await fetchDependencies(resolvedId, contextNodeName);
-                  return; // Done
+                  return;
               }
+          }
+          dependencyMap.set(realId, { name: wf.name, data: wf });
+          const nodes = wf.nodes || [];
+          for (const node of nodes) {
+              if (node.type === 'n8n-nodes-base.executeWorkflow') {
+                  const subId = node.parameters?.workflowId;
+                  if (subId && typeof subId === 'string' && !subId.startsWith('=')) {
+                       await fetchDependencies(subId, node.name);
+                  }
+              }
+          }
+      };
 
-              dependencyMap.set(realId, { name: wf.name, data: wf });
+      if (args.workflow) {
+          this.log(theme.agent(`Initializing virtual orchestrator for ${theme.value(args.workflow)}`));
+          if (!args.workflow.endsWith('.json')) this.error('Local JSON path required.');
+          const content = await fs.readFile(args.workflow, 'utf-8');
+          workflowData = JSON.parse(content);
+          workflowName = workflowData.name || 'Untitled';
+          
+          this.log(theme.agent(`Tracing dependencies for local file...`));
+          const nodes = workflowData.nodes || [];
+          for (const node of nodes) {
+              if (node.type === 'n8n-nodes-base.executeWorkflow') {
+                  const subId = node.parameters?.workflowId;
+                  if (subId && typeof subId === 'string' && !subId.startsWith('=')) {
+                       await fetchDependencies(subId, node.name);
+                  }
+              }
+          }
+      } else {
+          this.log(theme.info('Searching for local and remote workflows...'));
+          
+          const localChoices: any[] = [];
+          const workflowsDir = path.join(process.cwd(), 'workflows');
+          const searchDirs = [workflowsDir, process.cwd()];
+          
+          for (const dir of searchDirs) {
+              if (existsSync(dir)) {
+                  const files = await fs.readdir(dir);
+                  for (const file of files) {
+                      if (file.endsWith('.json')) {
+                          localChoices.push({
+                              name: `${theme.value('[LOCAL]')} ${file}`,
+                              value: { type: 'local', path: path.join(dir, file) }
+                          });
+                      }
+                  }
+              }
+          }
 
-              // Scan for Sub-Workflow Executions
-              const nodes = wf.nodes || [];
+          const remoteWorkflows = await client.getWorkflows();
+          const remoteChoices = remoteWorkflows
+            .filter(w => !w.name.startsWith('[TEST'))
+            .map(w => ({
+                name: `${theme.info('[n8n]')} ${w.name} (${w.id}) ${w.active ? '[Active]' : ''}`,
+                value: { type: 'remote', id: w.id }
+            }));
+
+          const choices = [
+              ...(localChoices.length > 0 ? [new inquirer.Separator('--- Local Files ---'), ...localChoices] : []),
+              ...(remoteChoices.length > 0 ? [new inquirer.Separator('--- n8n Instance ---'), ...remoteChoices] : []),
+          ];
+
+          if (choices.length === 0) this.error('No workflows found locally or on n8n instance.');
+
+          const { selection } = await inquirer.prompt([{
+              type: 'select',
+              name: 'selection',
+              message: 'Select a workflow to test:',
+              choices,
+              pageSize: 15
+          }]);
+
+          if (selection.type === 'local') {
+              this.log(theme.agent(`Initializing virtual orchestrator for ${theme.value(selection.path)}`));
+              const content = await fs.readFile(selection.path, 'utf-8');
+              workflowData = JSON.parse(content);
+              workflowName = workflowData.name || 'Untitled';
+              
+              this.log(theme.agent(`Tracing dependencies for local file...`));
+              const nodes = workflowData.nodes || [];
               for (const node of nodes) {
                   if (node.type === 'n8n-nodes-base.executeWorkflow') {
                       const subId = node.parameters?.workflowId;
-                      // Handle expression-based IDs (can't resolve statically)
                       if (subId && typeof subId === 'string' && !subId.startsWith('=')) {
                            await fetchDependencies(subId, node.name);
                       }
                   }
               }
-          };
-
-          // Start trace
-          await fetchDependencies(selectedWorkflowId, 'ROOT');
-
-          this.log(theme.info(`Found ${dependencyMap.size - 1} dependencies.`));
-
-          // 2. Deploy Dependencies
-          const idMap = new Map<string, string>(); // ANY id (real or broken) -> newTempId
-          // deployedDefinitions hoisted to run() scope
-          
-          (this as any).createdWorkflowIds = []; // Initialize logic for tracking
-          
-          // Ensure we don't deploy the root as a dependency
-          const rootRealId = resolutionMap.get(selectedWorkflowId) || selectedWorkflowId;
-          dependencyMap.delete(rootRealId);
-
-          for (const [realId, info] of dependencyMap.entries()) {
-               this.log(theme.agent(`Staging dependency: ${info.name} (ID: ${realId})...`));
-               
-               // Sanitize
-               let depData = {
-                   nodes: info.data.nodes,
-                   connections: info.data.connections,
-                   settings: info.data.settings,
-                   // pinData: info.data.pinData 
-               };
-               
-               
-               // Ensure there is an ACTIVATABLE trigger (Webhook).
-               // Manual triggers alone are not enough to "Activate" a workflow.
-               // We need a webhook to trick n8n into thinking this is a live service.
-               const hasActivatableTrigger = depData.nodes.some((n: any) => 
-                   n.type === 'n8n-nodes-base.webhook' && !n.disabled
-               );
-               
-               if (!hasActivatableTrigger) {
-                   this.log(theme.warn(`Dependency ${info.name} missing activatable trigger. Injecting webhook shim...`));
-                   depData = client.injectManualTrigger(depData); // Injects Webhook now
-
-                   // DEBUG: Verify injection
-                   const shimmedTypes = depData.nodes.map((n: any) => n.type);
-                   this.log(`DEBUG: Shimmed nodes for ${info.name}: ${JSON.stringify(shimmedTypes)}`);
-               }
-
-               // Create Temp
-               const { id: tempId } = await client.createWorkflow(`[n8m:dep] ${info.name}`, depData);
-               
-               // Track IMMEDIATELY for cleanup
-               (this as any).createdWorkflowIds.push(tempId);
-
-               // Activate it so it can be referenced (Validation requires Published state)
-               await client.executeWorkflow(tempId);
-
-               // Store definition for repair
-               deployedDefinitions.set(tempId, { name: info.name, data: depData, type: 'dependency', realId: realId });
-               
-               // Map REAL ID to TEMP ID
-               idMap.set(realId, tempId);
-               
-               // ALSO Map BROKEN ID to TEMP ID if it exists
-               for (const [broken, resolved] of resolutionMap.entries()) {
-                   if (resolved === realId) {
-                       idMap.set(broken, tempId);
-                   }
-               }
-          }
-          
-          // Hacky: Pass the list of created IDs to cleanup via a global or class prop? 
-          // Better: We'll modify the `finally` block to handle a list.
-          (this as any).createdWorkflowIds = Array.from(idMap.values()); // Store for cleanup
-          
-          // 4. Prepare Root Workflow with Patched IDs
-          const rootWf = await client.getWorkflow(selectedWorkflowId) as any;
-          workflowName = rootWf.name;
-          workflowData = rootWf;
-          
-          // PATCHING FUNCTION
-          const patchWorkflow = (wf: any, map: Map<string, string>) => {
-              // Naive string replacement for IDs might be dangerous if IDs are short/common.
-              // Better: Traverse nodes.
-              let str = JSON.stringify(wf);
-              for (const [oldId, newId] of map.entries()) {
-                  // Replace strict ID occurrences
-                  str = str.split(oldId).join(newId);
-              }
-              return JSON.parse(str);
-          };
-
-          const patchedRoot = patchWorkflow(workflowData, idMap);
-          
-          // Ensure it has a trigger shim too if we plan to activate it (which we do for validation)
-          const hasRootManualTrigger = patchedRoot.nodes.some((n: any) => n.type === 'n8n-nodes-base.manualTrigger' && !n.disabled);
-          if (!hasRootManualTrigger) {
-               this.log(theme.warn(`Root workflow missing manual trigger. Injecting shim...`));
-               // We need to re-assign patchedRoot result
-               const shimmed = client.injectManualTrigger(patchedRoot);
-               // Object.assign(patchedRoot, shimmed); // Be simpler
-               patchedRoot.nodes = shimmed.nodes;
-               patchedRoot.connections = shimmed.connections;
-          }
-
-          this.log(theme.agent(`Deploying ephemeral root: [n8m:test] ${workflowName}...`));
-          
-          // Sanitize
-          const rootPayload = {
-              nodes: patchedRoot.nodes,
-              connections: patchedRoot.connections,
-              settings: patchedRoot.settings
-          };
-
-          const { id: rootId } = await client.createWorkflow(`[n8m:test] ${workflowName}`, rootPayload);
-          
-          (this as any).createdWorkflowIds.push(rootId);
-          createdWorkflowId = rootId;
-
-          // Store root definition for lookup
-          // If we are testing a file, rootRealId might be null/undefined, or we might want to ask user?
-          // We stored `rootRealId` earlier via resolutionMap... but wait, if it's a file, `selectedWorkflowId` is the path?
-          // If args.workflow is set, `selectedWorkflowId` is undefined at start.
-          
-          let rootRealTargetId = undefined;
-          if (!args.workflow) {
-              rootRealTargetId = resolutionMap.get(selectedWorkflowId) || selectedWorkflowId;
-          }
-          
-          deployedDefinitions.set(rootId, { name: workflowName, data: rootPayload, type: 'root', realId: rootRealTargetId });
-
-          // DEBUG: Inspect Switch Node Logic
-          const switchNode = patchedRoot.nodes.find((n: any) => n.type === 'n8n-nodes-base.switch');
-          if (switchNode) {
-              this.log(theme.warn(`DEBUG: Switch Node Rules: ${JSON.stringify(switchNode.parameters, null, 2)}`));
-          }
-
-          this.log(theme.success('Environment Ready. Validating...'));
-          
-          // 5. Execute (Activate)
-          // We use /activate validation
-          // 5. Execute (Activate)
-          // We use /activate validation
-          await client.executeWorkflow(rootId);
-
-          // 6. Trigger Execution (E2E)
-          // Find the webhook node
-          const webhookNode = rootPayload.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
-          if (webhookNode) {
-              const method = webhookNode.parameters?.httpMethod || 'GET';
-              const path = webhookNode.parameters?.path;
+          } else {
+              this.log(theme.agent(`Tracing dependencies for ${theme.value(selection.id)}...`));
+              await fetchDependencies(selection.id, 'ROOT');
               
-              if (path) {
-                  // INTERACTIVE SELF-HEALING LOOP
-                  let attempts = 0;
-                  const maxAttempts = 10;
-                  let errorHistory: string[] = [];
-                  let finalSuccess = false;
+              const rootRealId = resolutionMap.get(selection.id) || selection.id;
+              const rootInfo = dependencyMap.get(rootRealId);
+              if (rootInfo) {
+                  workflowName = rootInfo.name;
+                  workflowData = rootInfo.data;
+                  dependencyMap.delete(rootRealId);
+              }
+              rootRealTargetId = rootRealId;
+          }
+      }
 
-                  while (attempts < maxAttempts && !finalSuccess) {
-                      attempts++;
-                      // Removed explicit attempt counter as requested
+      // --- GLOBAL REPAIR LOOP (Structural + Logical) ---
+      let globalAttempts = 0;
+      const maxGlobalAttempts = 10;
+      let globalRepairHistory: string[] = [];
+      const errorCounts = new Map<string, number>();
+
+      while (globalAttempts < maxGlobalAttempts && !globalSuccess) {
+          globalAttempts++;
+          
+          if (globalAttempts > 1) {
+              this.log(theme.agent(`${theme.warn('Global Repair Loop')} Attempt ${globalAttempts}/${maxGlobalAttempts}...`));
+          }
+
+          try {
+              // 1b. Stage dependencies
+              const idMap = new Map<string, string>(); 
+              (this as any).createdWorkflowIds = (this as any).createdWorkflowIds || []; 
+
+              for (const [realId, info] of dependencyMap.entries()) {
+                   this.log(theme.agent(`Staging dependency: ${info.name} (ID: ${realId})...`));
+                   let depData = {
+                       nodes: info.data.nodes,
+                       connections: info.data.connections,
+                       settings: info.data.settings || {},
+                       staticData: info.data.staticData || {}
+                   };
+                   const hasActivatableTrigger = depData.nodes.some((n: any) => n.type === 'n8n-nodes-base.webhook' && !n.disabled);
+                   if (!hasActivatableTrigger) {
+                       this.log(theme.warn(`Dependency ${info.name} missing activatable trigger. Injecting webhook shim...`));
+                       depData = client.injectManualTrigger(depData);
+                   }
+                   
+                   try {
+                       const { id: tempId } = await client.createWorkflow(`[n8m:dep] ${info.name}`, depData);
+                       (this as any).createdWorkflowIds.push(tempId);
+                       await client.executeWorkflow(tempId);
+                       deployedDefinitions.set(tempId, { name: info.name, data: depData, type: 'dependency', realId: realId });
+                       idMap.set(realId, tempId);
+                   } catch (err) {
+                       const errorMsg = this.cleanErrorMsg((err as Error).message);
+                       this.log(theme.error(`Staging Failed for ${info.name}: ${errorMsg}`));
+                       
+                       this.log(theme.agent(`Initiating auto-repair for structural failure...`));
+                       const ai = AIService.getInstance();
+                       const fixedWf = await ai.generateWorkflowFix(depData, `Staging Error: ${errorMsg}\nHistory: ${globalRepairHistory.join('\n')}`);
+                       dependencyMap.set(realId, { name: info.name, data: fixedWf });
+                       
+                       globalRepairHistory.push(`[Staging] ${info.name} failed: ${errorMsg}`);
+                       throw new Error("RETRY_STAGING");
+                   }
+              }
+      
+              const patchWorkflow = (wf: any, map: Map<string, string>) => {
+                  let str = JSON.stringify(wf);
+                  for (const [oldId, newId] of map.entries()) {
+                      str = str.split(oldId).join(newId);
+                  }
+                  return JSON.parse(str);
+              };
+
+              let currentWorkflowData = patchWorkflow(workflowData, idMap);
+
+              // 2. COMMON: Stage Ephemeral Root and Test
+              const rootPayload = {
+                  nodes: currentWorkflowData.nodes,
+                  connections: currentWorkflowData.connections,
+                  settings: currentWorkflowData.settings || {},
+                  staticData: currentWorkflowData.staticData || {}
+              };
+
+              const hasRootManualTrigger = rootPayload.nodes.some((n: any) => 
+                (n.type === 'n8n-nodes-base.manualTrigger' || n.type === 'n8n-nodes-base.webhook') && !n.disabled
+              );
+              
+              if (!hasRootManualTrigger) {
+                   this.log(theme.warn(`Root workflow missing manual/webhook trigger. Injecting shim...`));
+                   const shimmed = client.injectManualTrigger(rootPayload);
+                   rootPayload.nodes = shimmed.nodes;
+                   rootPayload.connections = shimmed.connections;
+              }
+
+              this.log(theme.agent(`Deploying ephemeral root: [n8m:test] ${workflowName}...`));
+              
+              let currentRootId: string;
+              try {
+                  const { id } = await client.createWorkflow(`[n8m:test] ${workflowName}`, rootPayload);
+                  currentRootId = id;
+                  (this as any).createdWorkflowIds.push(currentRootId);
+                  createdWorkflowId = currentRootId;
+              } catch (err) {
+                  const errorMsg = (err as Error).message;
+                  this.log(theme.error(`Staging Failed for Root: ${errorMsg}`));
+                  
+                  this.log(theme.agent(`Initiating auto-repair for structural failure...`));
+                  const ai = AIService.getInstance();
+                  const normMsg = this.normalizeError(errorMsg);
+                  const count = (errorCounts.get(normMsg) || 0) + 1;
+                  errorCounts.set(normMsg, count);
+                  const useSearch = count > 1;
+
+                  if (useSearch) {
+                    this.log(theme.agent(`${theme.warn('Grounding Active')}: Searching the web for n8n node metadata...`));
+                  }
+
+                  workflowData = await ai.generateWorkflowFix(rootPayload, `Staging Error: ${errorMsg}\nHistory: ${globalRepairHistory.join('\n')}`, 'gemini-3-flash-preview', useSearch);
+                  
+                  globalRepairHistory.push(`[Staging] Root failed: ${errorMsg}`);
+                  throw new Error("RETRY_STAGING");
+              }
+
+              deployedDefinitions.set(currentRootId, { name: workflowName, data: rootPayload, type: 'root', realId: rootRealTargetId });
+
+              this.log(theme.success('Environment Ready. Validating...'));
+              try {
+                  await client.executeWorkflow(currentRootId);
+              } catch (execErr) {
+                  const errorMsg = this.cleanErrorMsg((execErr as Error).message);
+                  this.log(theme.error(`Validation Activation Failed: ${errorMsg}`));
+                  
+                  this.log(theme.agent(`Initiating auto-repair for activation failure...`));
+                  const ai = AIService.getInstance();
+                  const normMsg = this.normalizeError(errorMsg);
+                  const count = (errorCounts.get(normMsg) || 0) + 1;
+                  errorCounts.set(normMsg, count);
+                  const useSearch = count > 1;
+
+                  if (useSearch) {
+                    this.log(theme.agent(`${theme.warn('Grounding Active')}: Searching the web for n8n node metadata...`));
+                  }
+
+                  workflowData = await ai.generateWorkflowFix(rootPayload, `Activation/Execution Error: ${errorMsg}\nHistory: ${globalRepairHistory.join('\n')}`, 'gemini-3-flash-preview', useSearch);
+                  
+                  globalRepairHistory.push(`[Activation] Failed: ${errorMsg}`);
+                  throw new Error("RETRY_STAGING");
+              }
+
+              // 3. Trigger Execution (E2E)
+              const webhookNode = rootPayload.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
+              if (webhookNode) {
+                  const path = webhookNode.parameters?.path;
+                  
+                  if (path) {
+                      const ai = AIService.getInstance();
                       
-                      if (attempts > 1) {
-                         this.log(theme.agent('Analyzing failure and regenerating payload...'));
-                      } else {
-                         this.log(theme.agent('Generating Mock Data...'));
-                      }
-                      
-                      // GATHER CONTEXT
                       const nodeNames = rootPayload.nodes.map((n: any) => n.name).join(', ');
-                      const switchNode = rootPayload.nodes.find((n: any) => n.type === 'n8n-nodes-base.switch');
-                      let switchRules = '';
-                      if (switchNode) {
-                          switchRules = JSON.stringify(switchNode.parameters);
-                      }
-
                       const context = `Workflow Name: "${workflowName}"
                       Nodes: ${nodeNames}
-                      Switch Rules: ${switchRules}
-                      Generate a SINGLE JSON object payload (do NOT generate an array) that effectively tests this workflow, ensuring it passes the Switch node conditions if possible.`;
+                      Generate a SINGLE JSON object payload that effectively tests this workflow.`;
 
-                      // CALL AI
-                      const ai = AIService.getInstance();
-                      let mockPayload = {};
-                      try {
-                          // Pass error history to AI
-                          mockPayload = await ai.generateMockData(context, 'gemini-3-pro-preview', errorHistory);
-                          this.log(theme.muted(`Mock Payload: ${JSON.stringify(mockPayload)}`));
-                      } catch (err) {
-                          this.log(theme.warn(`Generation Failed: ${(err as Error).message}. Using fallback.`));
-                          mockPayload = { message: "Generation Failed", timestamp: new Date().toISOString() };
-                      }
-
-                      this.log(theme.agent('Triggering Entry Point with Payload...'));
+                      this.log(theme.agent('Generating Mock Data...'));
+                      let mockPayload = await ai.generateMockData(context, 'gemini-3-flash-preview', globalRepairHistory);
                       
-                      // Construct Webhook URL
+                      this.log(theme.agent('Triggering Entry Point...'));
                       const baseUrl = new URL(n8nUrl).origin;
                       const webhookUrl = `${baseUrl}/webhook/${path}`;
                       
-                      let currentError: string | null = null;
-
-                      try {
-                          const response = await fetch(webhookUrl, {
-                              method: 'POST', 
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify(mockPayload)
-                          });
+                      const response = await fetch(webhookUrl, {
+                          method: 'POST', 
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(mockPayload)
+                      });
+                      
+                      if (response.ok) {
+                          const executionStartTime = Date.now();
+                          this.log(theme.done('Workflow Triggered Successfully.'));
+                          this.log(theme.subHeader('Live Execution Trace'));
                           
-                          if (response.ok) {
-                              // Reset previous execution tracking (by time)
-                              const executionStartTime = Date.now();
+                          let executionFound = false;
+                          const reportedNodes = new Set<string>();
                           
-                              this.log(theme.done('Workflow Triggered Successfully.'));
+                          const maxPoll = 50; 
+                          for (let i = 0; i < maxPoll; i++) {
+                              await new Promise(r => setTimeout(r, 2000));
+                              const executions = await client.getWorkflowExecutions(currentRootId);
+                              const recentExec = executions.find((e: any) => new Date(e.startedAt).getTime() > (executionStartTime - 5000));
                               
-                              // Polling for Completion & Live Tracing
-                              this.log(theme.subHeader('Live Execution Trace'));
-                              
-                              let executionFound = false;
-                              const reportedNodes = new Set<string>();
-                              
-                              // Poll for up to 100 seconds
-                              const maxPoll = 50; 
-                              for (let i = 0; i < maxPoll; i++) {
-                                  await new Promise(r => setTimeout(r, 2000));
-                                  // Removed dot progress to avoid messing up live output
+                              if (recentExec) {
+                                  executionFound = true;
+                                  const fullExec = await client.getExecution(recentExec.id) as any;
+                                  const runData = fullExec.data?.resultData?.runData || {};
+                                  let currentError: string | null = null;
                                   
-                                  try {
-                                      const executions = await client.getWorkflowExecutions(rootId);
-                                      // Look for any execution started AFTER trigger
-                                      const recentExec = executions.find((e: any) => new Date(e.startedAt).getTime() > (executionStartTime - 5000));
-                                      
-                                      if (recentExec) {
-                                          executionFound = true;
-                                          
-                                          // Update Status Line (erase previous line?) 
-                                          // Simpler: Just print updates. Or maybe a status log occasionally.
-                                          // Let's rely on live node updates.
-                                          
-                                          // Fetch full details for LIVE tracing
-                                          const fullExec = await client.getExecution(recentExec.id) as any;
-                                          const runData = fullExec.data?.resultData?.runData || {};
-                                          
-                                          // Log Status if changed or first time? 
-                                          // We can just log: "Status: running..." once.
-                                          
-                                          // Calculate current nodes count
-                                          // ...
-                                          
-                                          // Print NEW nodes
-                                           Object.entries(runData).forEach(([nodeName, runs]: [string, any]) => {
-                                               // We only care if we haven't reported this NODE yet (or a new run of it)
-                                               // Use for-loop to allow break/continue if needed, though here we just process
-                                               for (const [runIndex, run] of runs.entries()) {
-                                                   const uniqueKey = `${nodeName}-${runIndex}`;
-                                                   
-                                                   if (!reportedNodes.has(uniqueKey)) {
-                                                       reportedNodes.add(uniqueKey);
-                                                       
-                                                       // Filter out noise
-                                                       if (nodeName.includes('Shim_Flattener')) continue;
-
-                                                       // Print it!
-                                                       const outputData = run.data?.main?.[0]?.[0]?.json;
-                                                       let displayName = nodeName === 'N8M_Shim_Webhook' ? theme.label('[Trigger]') : theme.label(nodeName);
-                                                       const paddedName = displayName.padEnd(25, ' ');
-                                                       
-                                                       let outputStr = "";
-                                                       if (outputData) {
-                                                            // Success case
-                                                            const itemCount = run.data.main[0].length;
-                                                            const dataPreview = JSON.stringify(outputData);
-                                                            const truncated = dataPreview.length > 80 ? dataPreview.substring(0, 80) + '...' : dataPreview;
-                                                            outputStr = `${theme.success('✔')} (${itemCount} item) ${theme.muted(truncated)}`; // Used theme.muted instead of dim
-                                                       } else {
-                                                            // Failure / Stop case
-                                                            currentError = `Flow stopped at ${displayName} (0 items)`;
-                                                            outputStr = theme.warn('🛑 Flow stopped here (0 items produced)');
-                                                       }
-                                                       
-                                                       this.log(`• ${paddedName} ${outputStr}`);
-                                                   }
-                                               }
-                                           });
-                                          
-                                          // Check if stalled/waiting
-                                          if (recentExec.status === 'waiting') {
-                                              // Warn user occasionally?
-                                          }
-
-                                          // FAST FAILURE: If we detected a logical stop, abort waiting
-                                          if (currentError) {
-                                              this.log(theme.warn(` Fast-Fail: ${currentError}`));
-                                              break;
-                                          }
-
-                                          // PREMATURE STOP CHECK (New)
-                                          // If a node produced items but didn't trigger its downstream neighbors
-                                          if (!recentExec.finished) {
-                                              // Only check this if finished? Or continuous?
-                                              // If n8n says finished, but we know we didn't reach end?
-                                              // Let's check this ONLY when finished to avoid race conditions during run
-                                          }
-
-                                          if (recentExec.finished) {
-                                              // Check for Premature Stop
-                                              // For each executed node, did it produce output? If so, did the connected node run?
+                                  Object.entries(runData).forEach(([nodeName, runs]: [string, any]) => {
+                                      for (const [runIndex, run] of runs.entries()) {
+                                          const uniqueKey = `${nodeName}-${runIndex}`;
+                                          if (!reportedNodes.has(uniqueKey)) {
+                                              reportedNodes.add(uniqueKey);
+                                              if (nodeName.includes('Shim_Flattener')) continue;
                                               
-                                              let prematureError = null;
-                                              const executedNodes = new Set(Object.keys(runData));
-                                              
-                                              for (const [nodeName, runs] of Object.entries(runData)) {
-                                                   const nodeRuns = runs as any[];
-                                                   // Check the LAST run of this node
-                                                   const lastRun = nodeRuns[nodeRuns.length - 1];
-                                                   
-                                                   // Check outputs
-                                                   if (lastRun.data?.main) {
-                                                       lastRun.data.main.forEach((items: any[], outputIndex: number) => {
-                                                           if (items && items.length > 0) {
-                                                               // This node produced items on outputIndex
-                                                               // Does it have a connection?
-                                                               const nodeConns = rootPayload.connections[nodeName];
-                                                               if (nodeConns && nodeConns.main && nodeConns.main[outputIndex]) {
-                                                                   // It Has connections. Did any target run?
-                                                                   const targets = nodeConns.main[outputIndex];
-                                                                   const anyTargetRan = targets.some((t: any) => executedNodes.has(t.node));
-                                                                   
-                                                                   if (!anyTargetRan) {
-                                                                       // Suspect Premature Stop
-                                                                       // Exception: Logic nodes might be leaf nodes? No, connection exists.
-                                                                       // Exception: Disabled nodes?
-                                                                       prematureError = `Flow ended early at [${nodeName}] (Output ${outputIndex} connected but target didn't run)`;
-                                                                   }
-                                                               }
-                                                           }
-                                                       });
-                                                   }
-                                              }
-                                              
-                                              if (prematureError) {
-                                                  currentError = prematureError;
-                                                  this.log(theme.warn(`Validation Warning: ${currentError}`));
-                                              }
-
-                                              if (fullExec.data?.resultData?.error) {
-                                                   currentError = `Execution Error: ${fullExec.data.resultData.error.message}`;
-                                                   this.log(theme.fail(currentError));
-                                              } else if (currentError) {
-                                                   // We detected a logical stop (Empty items OR Premature stop)
-                                                   // Don't set finalSuccess = true
+                                              const outputData = run.data?.main?.[0]?.[0]?.json;
+                                              let displayName = nodeName === 'N8M_Shim_Webhook' ? theme.label('[Trigger]') : theme.label(nodeName);
+                                              const paddedName = displayName.padEnd(25, ' ');
+                                              if (outputData) {
+                                                   const keys = Object.keys(outputData).join(', ');
+                                                   this.log(`${theme.agent('•')} ${paddedName} ${theme.success('✔')} (1 item) ${theme.muted(keys.substring(0, 60))}${keys.length > 60 ? '...' : ''}`);
                                               } else {
-                                                   this.log(theme.done(`Execution Finished Successfully. (ID: ${recentExec.id})`));
-                                                   finalSuccess = true;
+                                                   currentError = `Flow stopped at ${displayName} (0 items)`;
+                                                   this.log(`${theme.agent('•')} ${paddedName} ${theme.warn('🛑 Flow stopped (0 items)')}`);
                                               }
-                                              break; // Stop polling
                                           }
                                       }
-                                  } catch (pollErr) {
-                                      // Ignore poll errors
-                                  }
-                              }
-                              
-                              if (!finalSuccess) {
-                                  if (executionFound) {
-                                      if (!currentError) {
-                                          this.log(theme.warn('\nExecution is still active (running or waiting). Monitor n8n UI for details.'));
-                                          finalSuccess = true; // Treat as Pass for AI workflows ONLY if no errors found
+                                  });
+
+                                  if (fullExec.status === 'success' || fullExec.status === 'failed' || currentError) {
+                                      if (fullExec.status === 'success' && !currentError) {
+                                          this.log(theme.success(`Execution Finished Successfully. (ID: ${recentExec.id})`));
+                                          globalSuccess = true;
                                       } else {
-                                          this.log(theme.warn('\nExecution stopped internally.'));
+                                          const errorMsg = currentError || (fullExec.data?.resultData?.error?.message || "Unknown flow failure");
+                                          this.log(theme.error(`Execution Failed/Stopped: ${errorMsg}`));
+                                          
+                                          this.log(theme.agent(`Initiating auto-repair for logical failure...`));
+                                          const normMsg = this.normalizeError(errorMsg);
+                                          const count = (errorCounts.get(normMsg) || 0) + 1;
+                                          errorCounts.set(normMsg, count);
+                                          const useSearch = count > 1;
+
+                                          if (useSearch) {
+                                            this.log(theme.agent(`${theme.warn('Grounding Active')}: Searching the web for n8n node metadata...`));
+                                          }
+
+                                          workflowData = await ai.generateWorkflowFix(workflowData, `Execution Failed/Stopped: ${errorMsg}\nPayload was: ${JSON.stringify(mockPayload)}\nHistory: ${globalRepairHistory.join('\n')}`, 'gemini-3-flash-preview', useSearch);
+                                          globalRepairHistory.push(`[Execution] Failed: ${errorMsg}`);
+                                          throw new Error("RETRY_STAGING");
                                       }
-                                  } else {
-                                      currentError = "\nTimeout: Execution did not start within 100 seconds.";
-                                      this.log(theme.warn(currentError));
+                                      break;
                                   }
                               }
-
-                          } else {
-                              currentError = `Trigger HTTP Error: ${response.status} ${response.statusText}`;
-                              this.log(theme.fail(currentError));
                           }
-                      } catch (err) {
-                          currentError = `Trigger Network Error: ${(err as Error).message}`;
-                          this.log(theme.fail(currentError));
-                      }
-
-                      if (currentError) {
-                          errorHistory.push(`Attempt ${attempts}: ${currentError}`);
                           
-                          if (attempts < maxAttempts) {
-                             this.log(theme.info(`Test run failed. Attempting Self-Repair (${attempts + 1}/${maxAttempts})...`));
-                             
-                             // REPAIR STRATEGY:
-                             // If we have "Flow stopped at [NodeName]", identify if it calls a dependency.
-                             // If so, try to patch the dependency workflow.
-                             
-                             let workflowPatched = false;
-                             if (currentError && currentError.includes('Flow stopped at')) {
-                                 // Extract Node Name
-                                 const flowMatch = currentError.match(/Flow stopped at (.*?) \(0 items\)/);
-                                 if (flowMatch) {
-                                     const nodeName = flowMatch[1].trim();
-                                     // Find detailed node in Root
-                                     const failingNode = rootPayload.nodes.find((n:any) => theme.label(n.name).trim() === nodeName || n.name === nodeName || nodeName.includes(n.name));
-                                     
-                                     if (failingNode && failingNode.type === 'n8n-nodes-base.executeWorkflow') {
-                                         const calledId = failingNode.parameters?.workflowId;
-                                         if (calledId && deployedDefinitions.has(calledId)) {
-                                             this.log(theme.agent(`Detected logical failure in dependency workflow used by node '${nodeName}'. analyzing and fixing logic...`));
-                                             
-                                             const targetDef = deployedDefinitions.get(calledId);
-                                             const ai = AIService.getInstance();
-                                             
-                                             // Trace is generic, we don't have the sub-trace. We trust AI to inspect the JSON logic vs what happened (0 items returned).
-                                             try {
-                                                 const fixedJson = await ai.generateWorkflowFix(targetDef.data, `The workflow executed but produced NO ITEMS (stopped early). Input was: ${JSON.stringify(mockPayload)}. Review if the logic filters everything out.`, "gemini-2.0-flash");
-                                                 
-                                                 this.log(theme.agent(`Applying logic patch to dependency '${targetDef.name}'...`));
-                                                 
-                                                 // Ensure required fields like 'name' are preserved
-                                                 fixedJson.name = targetDef.name;
-                                                 
-                                                 await client.updateWorkflow(calledId, fixedJson); // Update the EPHEMERAL workflow
-                                                 deployedDefinitions.get(calledId).data = fixedJson; // Update local cache
-                                                 workflowPatched = true;
-                                             } catch (fixErr) {
-                                                 this.log(theme.fail(`Workflow fix failed: ${fixErr}`));
-                                             }
-                                         }
-                                     }
-                                 }
-                             }
-                             
-                             // If we didn't patch workflow, regenerate data
-                             if (!workflowPatched) {
-                                 this.log(theme.info(`Regenerating test data...`));
-                                 // Standard data regen loop continues below
-                             } else {
-                                 // If patched, we reuse the SAME payload to verify the fix
-                                 continue;
-                             }
+                          if (!executionFound) {
+                              this.log(theme.warn('No execution found after webhook trigger.'));
+                              globalRepairHistory.push("[Execution] No execution triggered.");
+                              throw new Error("RETRY_STAGING");
                           }
                       }
-                  } 
-
-                  if (!finalSuccess) {
-                      this.log(theme.fail(`Failed after ${attempts} attempts.`));
                   }
+              } else {
+                  this.log(theme.done('Workflow Validated Successfully (No webhook trigger needed).'));
+                  globalSuccess = true;
               }
-          } else {
-              this.log(theme.warn('No Webhook found to trigger. Validated only.'));
+
+          } catch (err) {
+              if ((err as Error).message === "RETRY_STAGING") {
+                  if ((this as any).createdWorkflowIds) {
+                      for (const id of (this as any).createdWorkflowIds) {
+                          try { await client.deleteWorkflow(id); } catch (e) {}
+                      }
+                      (this as any).createdWorkflowIds = [];
+                  }
+                  continue;
+              }
+              throw err;
           }
-
-
-
-
-      } // End of else (interactive)
-
-    } catch (error) {
-      const errMsg = (error as Error).message;
-      
-      // Try to parse JSON error from n8n
-      let cleanMsg = errMsg;
-      try {
-        // failed to validate: n8n Validation Error: 400 - {"message": "..."}
-        // Extract JSON part if possible
-        const jsonMatch = errMsg.match(/\{.*\}/);
-        if (jsonMatch) {
-            const errorObj = JSON.parse(jsonMatch[0]);
-            if (errorObj.message) {
-                cleanMsg = errorObj.message;
-            }
-        }
-      } catch (e) {
-          // ignore parsing error
       }
 
+      if (!globalSuccess) {
+          this.error(`Workflow test failed after ${maxGlobalAttempts} repair attempts.`);
+      }
+
+    } catch (error) {
+      const errMsg = this.cleanErrorMsg((error as Error).message);
+
       this.log(theme.fail(`Validation Failed`));
-      this.log(theme.brand() + ' ' + theme.error(cleanMsg));
+      this.log(theme.brand() + ' ' + theme.error(errMsg));
+      process.exitCode = 1;
       
       if (flags['keep-on-fail'] && createdWorkflowId) {
          this.log(theme.warn(`PRESERVATION ACTIVE: Workflow ${createdWorkflowId} persists.`));
          createdWorkflowId = null; 
       }
-      } finally {
-        // Post-Test Save Prompt (Only if we have deployed something and aren't in error catch)
-        if (deployedDefinitions.size > 0) {
-            await this.handlePostTestActions(deployedDefinitions, args.workflow, client);
+    } finally {
+        if (deployedDefinitions.size > 0 && globalSuccess) {
+            if (flags['validate-only']) {
+                if (args.workflow && args.workflow.endsWith('.json')) {
+                    const rootDef = Array.from(deployedDefinitions.values()).find(d => d.type === 'root');
+                    if (rootDef) {
+                        const cleanData = this.sanitizeWorkflow(this.stripShim(rootDef.data));
+                        cleanData.name = rootDef.name;
+                        try {
+                            await fs.writeFile(args.workflow, JSON.stringify(cleanData, null, 2));
+                            this.log(theme.muted(`[Repair-Sync] Updated local file with latest repairs.`));
+                        } catch (e) {
+                            this.warn(`Failed to sync repairs: ${(e as Error).message}`);
+                        }
+                    }
+                }
+            } else {
+                await this.handlePostTestActions(deployedDefinitions, args.workflow, client);
+            }
         }
 
        const allIds = [createdWorkflowId, ...((this as any).createdWorkflowIds || [])].filter(Boolean);
-      const uniqueIds = [...new Set(allIds)];
+       const uniqueIds = [...new Set(allIds)];
       
-      if (uniqueIds.length > 0) {
+       if (uniqueIds.length > 0) {
         this.log(theme.info(`Purging ${uniqueIds.length} temporary assets...`));
-        
         for (const wid of uniqueIds) {
             try {
               if (wid) await client.deleteWorkflow(wid);
-            } catch (cleanupError) {
-              // this.warn(theme.fail(`Purge failed for ${wid}: ${(cleanupError as Error).message}`));
-            }
+            } catch (cleanupError) {}
         }
         this.log(theme.done('Environment clean.'));
       }
@@ -652,79 +567,78 @@ export default class Test extends Command {
   }
 
   /**
-   * Sanitize workflow data for Public API (Remove read-only fields)
+   * Extract clean error message from n8n API responses
    */
+  private cleanErrorMsg(errMsg: any): string {
+      if (!errMsg || typeof errMsg !== 'string') return String(errMsg || 'Unknown Error');
+      try {
+        const jsonMatch = errMsg.match(/\{.*\}/);
+        if (jsonMatch) {
+            const errorObj = JSON.parse(jsonMatch[0]);
+            if (errorObj.message) {
+                return errorObj.message;
+            }
+        }
+      } catch (e) {}
+      return errMsg;
+  }
+
+  /**
+   * Normalize error messages to catch "similar" errors (masking IDs/numbers)
+   */
+  private normalizeError(msg: string): string {
+      let normalized = msg.toLowerCase();
+      // Group all unrecognized node type errors
+      if (normalized.includes('unrecognized node type')) {
+          return 'unrecognized node type';
+      }
+      return normalized
+          .replace(/\b[a-f0-9-]{36}\b/g, 'ID')
+          .replace(/\b[a-f0-9]{24}\b/g, 'ID')
+          .replace(/\b\d+\b/g, 'N')
+          .replace(/\s+/g, ' ')
+          .trim();
+  }
+
   private sanitizeWorkflow(data: any): any {
       const allowedKeys = ['name', 'nodes', 'connections', 'settings', 'staticData', 'pinData', 'meta'];
       const sanitized: any = {};
-      
       for (const key of allowedKeys) {
           if (data[key] !== undefined) {
               sanitized[key] = data[key];
           }
       }
-      
       return sanitized;
   }
 
-  /**
-   * Remove temporary test shims (Webhook + Flattener) from workflow data
-   */
   private stripShim(workflowData: any): any {
       if (!workflowData.nodes) return workflowData;
-
-      // Identify shim nodes
       const nodes = workflowData.nodes.filter((n: any) => 
           n.name !== 'N8M_Shim_Webhook' && 
           n.name !== 'Shim_Flattener'
       );
-
-      // Clean connections
       const connections: any = {};
       for (const [nodeName, conns] of Object.entries(workflowData.connections || {})) {
           if (nodeName === 'N8M_Shim_Webhook' || nodeName === 'Shim_Flattener') continue;
-          
-          // Filter outputs that might point TO shims (unlikely, but possible?)
-          // Usually shims point TO real nodes. real nodes don't point BACK to shims.
-          // So just preserving non-shim source entries is usually enough.
           connections[nodeName] = conns;
       }
-
-      return {
-          ...workflowData,
-          nodes,
-          connections
-      };
+      return { ...workflowData, nodes, connections };
   }
 
-  /**
-   * Prompt user to save active workflow definitions to disk
-   */
   private async saveWorkflows(deployedDefinitions: Map<string, any>, originalPath?: string) {
       if (deployedDefinitions.size === 0) return;
-
       const { save } = await inquirer.prompt([{
           type: 'confirm',
           name: 'save',
-          message: 'Test passed. Save workflows locally for review/deployment?',
+          message: 'Test passed. Save workflows locally?',
           default: true
       }]);
-
       if (!save) return;
 
       for (const [id, def] of deployedDefinitions.entries()) {
           const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
           cleanData.name = def.name;
-          
-          let targetPath = '';
-          
-          if (def.type === 'root' && originalPath) {
-              targetPath = originalPath;
-          } else {
-              // For dependencies or unknown sources, use name-based path
-              const safeName = def.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-              targetPath = path.join(process.cwd(), 'workflows', `${safeName}.json`);
-          }
+          let targetPath = originalPath && def.type === 'root' ? originalPath : path.join(process.cwd(), 'workflows', `${def.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`);
 
           const { confirmPath } = await inquirer.prompt([{
               type: 'input',
@@ -734,30 +648,23 @@ export default class Test extends Command {
           }]);
 
           try {
-              // Ensure dir exists
               await fs.mkdir(path.dirname(confirmPath), { recursive: true });
               await fs.writeFile(confirmPath, JSON.stringify(cleanData, null, 2));
               this.log(theme.success(`Saved to ${confirmPath}`));
           } catch (e) {
-              this.log(theme.fail(`Failed to save to ${confirmPath}: ${(e as Error).message}`));
+              this.log(theme.fail(`Failed to save: ${(e as Error).message}`));
           }
       }
   }
 
-  /**
-   * Handle post-test actions: Deploy or Save
-   */
   private async handlePostTestActions(deployedDefinitions: Map<string, any>, originalPath: string | undefined, client: N8nClient) {
       if (deployedDefinitions.size === 0) return;
-
-      this.log(''); // spacer
       const { action } = await inquirer.prompt([{
           type: 'confirm',
           name: 'action',
-          message: 'Test passed. Deploy changes to instance? (Y = Deploy, n = Save to file)',
+          message: 'Test completed. Deploy changes to instance? (Y = Deploy, n = Save to file)',
           default: true
       }]);
-
       if (action) {
           await this.deployWorkflows(deployedDefinitions, client);
       } else {
@@ -765,45 +672,39 @@ export default class Test extends Command {
       }
   }
 
-  /**
-   * Deploy workflows to the instance (Overwrite)
-   */
   private async deployWorkflows(deployedDefinitions: Map<string, any>, client: N8nClient) {
       for (const [tempId, def] of deployedDefinitions.entries()) {
           const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
           cleanData.name = def.name;
-          
           if (def.realId) {
              try {
-                 this.log(theme.agent(`Deploying (Overwriting) ${theme.value(def.name)} [${def.realId}]...`));
-                 
-                 // DEBUG: Check Trigger Existence
-                 const triggers = cleanData.nodes.filter((n: any) => n.type.includes('Trigger') || n.type.includes('webhook'));
-                 // this.log(`DEBUG: Triggers in payload: ${triggers.map((t:any) => t.type).join(', ')}`);
-
-                 await client.updateWorkflow(def.realId, cleanData);
-                 this.log(theme.success(`✔ Updated ${def.name}`));
+                  this.log(theme.agent(`Deploying (Overwriting) ${theme.value(def.name)} [${def.realId}]...`));
+                  await client.updateWorkflow(def.realId, cleanData);
+                  this.log(theme.success(`✔ Updated ${def.name}`));
              } catch (e) {
-                 const msg = (e as Error).message;
-                 // Fallback: If activation fails, try deactivating
-                 if (msg.includes('trigger') || msg.includes('activated')) {
-                     this.log(theme.warn(`⚠ Activation rejected: ${msg}`));
-                     this.log(theme.agent(`Attempting to deactivate and retry ${def.name}...`));
-                     try {
-                         await client.deactivateWorkflow(def.realId);
-                         // Retry update without any 'active' property (body should already be clean)
-                         await client.updateWorkflow(def.realId, cleanData);
-                         this.log(theme.success(`✔ Updated ${def.name} (Deactivated)`));
-                     } catch (retryErr) {
-                         this.log(theme.fail(`Failed to update ${def.name}: ${(retryErr as Error).message}`));
-                     }
-                 } else {
-                     this.log(theme.fail(`Failed to update ${def.name}: ${msg}`));
-                 }
+                  const msg = (e as Error).message;
+                  if (msg.includes('trigger') || msg.includes('activated')) {
+                      try {
+                          await client.deactivateWorkflow(def.realId);
+                          await client.updateWorkflow(def.realId, cleanData);
+                          this.log(theme.success(`✔ Updated ${def.name} (Deactivated)`));
+                      } catch (retryErr) {
+                          this.log(theme.fail(`Failed to update ${def.name}: ${(retryErr as Error).message}`));
+                      }
+                  } else {
+                      this.log(theme.fail(`Failed to update ${def.name}: ${msg}`));
+                  }
              }
           } else {
-              this.log(theme.warn(`Skipping deployment for ${def.name}: No target ID found (was it a local file?). Save to file instead.`));
-          }
-      }
-  }
+                try {
+                    this.log(theme.agent(`Deploying (Creating New) ${theme.value(def.name)}...`));
+                    const result = await client.createWorkflow(def.name, cleanData);
+                    this.log(theme.success(`✔ Created ${def.name} [ID: ${result.id}]`));
+                    this.log(`${theme.label('Link')} ${theme.secondary(client.getWorkflowLink(result.id))}`);
+                } catch (e) {
+                    this.log(theme.fail(`Failed to create ${def.name}: ${(e as Error).message}`));
+                }
+            }
+        }
+     }
 }

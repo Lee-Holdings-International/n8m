@@ -280,7 +280,7 @@ export class N8nClient {
    */
   injectManualTrigger(workflowData: any): any {
       const shimNodeId = "shim-trigger-" + Math.random().toString(36).substring(7);
-      const webhookPath = "n8m-shim-" + Math.random().toString(36).substring(7);
+      const webhookPath = String("n8m-shim-" + Math.random().toString(36).substring(7));
       
       // Shim Node (Trigger)
       const shimNode = {
@@ -295,13 +295,13 @@ export class N8nClient {
           type: "n8n-nodes-base.webhook",
           typeVersion: 1,
           position: [0, 0],
-          webhookId: webhookPath
+          webhookId: String(webhookPath)
       };
 
       // Flattener Node (Code)
       // Hoists 'body' and 'query' to root so downstream nodes see expected schema
       const flattenerId = "shim-flattener-" + Math.random().toString(36).substring(7);
-      const flattenerNode = {
+      const flattenerNode: any = {
           parameters: {
               jsCode: `return items.map(item => {
     const body = item.json.body || {};
@@ -322,6 +322,9 @@ export class N8nClient {
           typeVersion: 2,
           position: [200, 0]
       };
+      
+      // Ensure no webhookId on flattener or non-webhooks
+      delete flattenerNode.webhookId;
 
       const nodes = [...(workflowData.nodes || []), shimNode, flattenerNode];
       const connections = { ...(workflowData.connections || {}) };

@@ -19,26 +19,23 @@ workflows, treating them like first-class code.
 ### 🧪 Headless Integration Testing
 
 Finally, run your workflows as automated test suites. `n8m test` spins up an
-**ephemeral environment**, injects your mock data, runs the flow, and validatess
+**ephemeral environment**, injects your mock data, runs the flow, and validates
 the output—all without opening a browser.
 
-- **AI-Driven Self-Repair**: If a test fails, `n8m` uses Google Gemini to
-  analyze the failure and propose a logic patch.
-- **CI/CD Ready**: Fail your build if the workflow breaks.
+- **Global Self-Repair Loop**: `n8m` targets both structural staging errors
+  (hallucinated nodes) and logical execution failures (zero items produced). It
+  uses AI to analyze failures and patch your workflows automatically.
+- **CI/CD Ready**: Fail your build if the workflow breaks logic or schema.
 - **Ephemeral**: Zero cleanup required. Temporary assets are purged
   automatically.
 
-### 🚀 Smart Deployment & "Human-in-the-Loop"
+### 🚀 Agentic Workflow Creation
 
-Treat your workflows like code. `n8m` ensures that what you deploy is actually
-verified.
+Describe your idea, and `n8m` builds the blueprint and the JSON for you.
 
-- **Interactive Verification**: After a successful test, it prompts:
-  `Deploy to instance? (Y/n)`.
-- **Shim Stripping**: Automatically removes test-specific shims (webhooks,
-  flattener nodes) before saving or deploying.
-- **Robust Auto-Fix**: Automatically handles activation errors by deactivating
-  sub-workflows on-the-fly during deployment.
+- **Automatic Naming & Linking**: Handles parent/child workflow linking and
+  descriptive naming out-of-the-box.
+- **Human-in-the-Loop**: Review the AI's blueprint before it starts building.
 
 ---
 
@@ -62,29 +59,20 @@ n8m login
 n8m config --n8n-url https://n8n.your-company.com --n8n-key <your-api-key>
 ```
 
-### 2. Test & Auto-Repair
+### 2. Create from Idea
 
-Validate a local workflow file or a remote workflow.
+Generate a complete system of workflows from a simple description.
 
 ```bash
-# Interactive test with AI self-repair
-n8m test
+n8m create "RSS feed to Slack with a sub-workflow for message formatting"
 ```
 
-### 3. Deploy to Production
+### 3. Test & Auto-Repair
 
-Push a local file to your active instance.
-
-```bash
-n8m deploy ./workflows/seo-report.json --activate
-```
-
-### 4. Manage Account
-
-Check your service status.
+Validate local files or existing workflows with the deep repair loop.
 
 ```bash
-n8m balance
+n8m test ./workflows/my-flow.json
 ```
 
 ---
@@ -114,13 +102,20 @@ graph LR
 
 ## 🗺️ Roadmap
 
-- [x] **Headless Testing**: Run workflows as tests.
-- [x] **AI Self-Repair**: Automated logic patching for failing nodes.
-- [x] **Interactive Flow**: Human-in-the-loop Deploy vs Save logic.
-- [x] **Smart Deployment**: CLI-based workflow pushing with activation fallback.
-- [ ] **AI Workflow Generation**: Describe expectations, get JSON
-      (`n8m create`).
-- [ ] **Multi-Instance Sync**: Sync flows between Dev and Prod.
+### 📦 Latest Releases
+
+- [x] **Global Self-Repair**: Automated recovery for both staging and logical
+      failures.
+- [x] **Agentic Creator**: Multi-workflow generation with automatic linking.
+- [x] **Universal Selection**: Fuzzy search for workflows on your instance or
+      local files.
+
+### ⚡ Coming Soon: The "Edit" Loop
+
+- [ ] **Modify Existing**: Soon you'll be able to download an existing workflow,
+      provide an AI prompt to "Modify the Slack node to use a different
+      channel", verify it with a test, and upload the fix back—all in one
+      command.
 
 ---
 

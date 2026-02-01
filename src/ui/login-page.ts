@@ -36,7 +36,7 @@ export const getLoginPageHtml = (supabaseUrl: string, supabaseKey: string, redir
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>n8m | Access Terminal</title>
+      <title>n8m | SaaS Login</title>
       <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -312,13 +312,13 @@ export const getLoginPageHtml = (supabaseUrl: string, supabaseKey: string, redir
         </div>
         
         <div id="auth-form-container">
-            <h1>Log in to n8m</h1>
-            <div class="subtext">Sign in to your account.</div>
+            <h1>n8m SaaS</h1>
+            <div class="subtext">AI Workflow Orchestration</div>
             
             <form onsubmit="event.preventDefault(); handleLogin();">
                 <div class="input-group">
                     <label for="email">Email</label>
-                    <input type="email" id="email" placeholder="name@company.com" required />
+                    <input type="email" id="email" placeholder="name@company.com" ${!supabaseUrl || supabaseUrl.includes('placeholder') ? '' : 'required'} />
                 </div>
                 
                 <div class="input-group">
@@ -327,6 +327,10 @@ export const getLoginPageHtml = (supabaseUrl: string, supabaseKey: string, redir
                 </div>
                 
                 <button type="submit" class="btn-primary" id="sign-in-btn">Sign In</button>
+                
+                ${(!supabaseUrl || supabaseUrl.includes('placeholder')) && !redirectUrl ? `
+                <button type="button" class="btn-primary" style="background: transparent; border: 1px solid var(--border-subtle); color: var(--text-muted); margin-top: 12px; box-shadow: none;" onclick="window.location.href='/api/v1/billing?guest=true'">Continue as Guest (Offline Mode)</button>
+                ` : ''}
             </form>
             
             <div id="message"></div>
@@ -389,19 +393,21 @@ export const getLoginPageHtml = (supabaseUrl: string, supabaseKey: string, redir
                   // FORCE REFRESH: This is the critical fix.
                   // getUser() accepts valid stateless JWTs.
                   // refreshSession() requires a valid Refresh Token.
-                  // If admin.signOut() revoked the Refresh Token, this call WILL fail.
                   const { data, error } = await client.auth.refreshSession();
-                  
                   if (error || !data.session) {
-                      // Session is invalid (e.g. revoked), force re-login
-                      // console.log('Session refresh failed:', error);
                       await client.auth.signOut();
                       document.getElementById('auth-form-container').style.display = 'block';
                       document.getElementById('session-confirm-container').style.display = 'none';
                   } else {
-                      document.getElementById('auth-form-container').style.display = 'none';
-                      document.getElementById('session-confirm-container').style.display = 'block';
-                      document.getElementById('user-welcome-text').innerText = 'Authenticated as ' + session.user.email;
+                       document.getElementById('auth-form-container').style.display = 'none';
+                       document.getElementById('session-confirm-container').style.display = 'block';
+                       document.getElementById('user-welcome-text').innerText = 'Authenticated as ' + session.user.email;
+
+                       // AUTO-AUTHORIZE: Don't wait for click if we have a destination
+                       if ('${redirectUrl}') {
+                           showSimpleMessage('Syncing session...', 'neutral', 'confirm-message');
+                           setTimeout(authorizeCli, 800);
+                       }
                   }
               }
           }

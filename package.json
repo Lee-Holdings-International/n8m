@@ -28,15 +28,19 @@
     "dotenv": "^17.2.3",
     "fastify": "^5.7.2",
     "fastify-plugin": "^5.1.0",
+    "fastify-raw-body": "^5.0.0",
     "ink": "^6.6.0",
     "ink-gradient": "^3.0.0",
     "ink-link": "^5.0.0",
     "ink-markdown": "^1.0.4",
+    "ink-multiline-input": "^0.1.0",
     "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "inquirer": "^13.2.2",
     "keytar": "^7.9.0",
     "open": "^11.0.0",
-    "react": "^19.2.4"
+    "react": "^19.2.4",
+    "stripe": "^20.3.0"
   },
   "devDependencies": {
     "@oclif/prettier-config": "^0.2.1",

@@ -10,10 +10,8 @@ export default class Login extends Command {
   static description = 'Authenticate with the n8m platform';
 
   async run(): Promise<void> {
-    const serverPort = 8910;
     const apiUrl = process.env.N8M_API_URL || 'http://localhost:3000/api/v1'; 
-    const loginUrl = `${apiUrl}/auth/login?redirect_port=${serverPort}`;
-
+    
     this.log(theme.brand());
     this.log(theme.header('PLATFORM AUTHENTICATION'));
 
@@ -25,11 +23,31 @@ export default class Login extends Command {
       return;
     }
 
+    this.log(theme.info('Checking local security channel...'));
 
-    this.log(theme.info('Opening login page...'));
+    // 1. Find an available port
+    const getAvailablePort = (startPort: number): Promise<number> => {
+      return new Promise((resolve, reject) => {
+        const server = http.createServer();
+        server.on('error', (err: any) => {
+          if (err.code === 'EADDRINUSE') {
+            resolve(getAvailablePort(startPort + 1));
+          } else {
+            reject(err);
+          }
+        });
+        server.listen(startPort, () => {
+          server.close(() => resolve(startPort));
+        });
+      });
+    };
 
+    const serverPort = await getAvailablePort(8910);
+    const loginUrl = `${apiUrl}/auth/login?redirect_port=${serverPort}`;
 
-    // 1. Start Local Server
+    this.log(theme.info(`Starting secure listener on port ${theme.secondary(serverPort.toString())}...`));
+
+    // 2. Start Local Server
     const server = http.createServer(async (req, res) => {
       const url = new URL(req.url!, `http://${req.headers.host}`);
       
@@ -43,8 +61,7 @@ export default class Login extends Command {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end(getSuccessPageHtml(accessToken));
 
-          
-          this.log(theme.done('Login successful.'));
+          this.log(theme.done('Authentication successful. Session synchronized.'));
           server.close();
           process.exit(0);
         } else {
@@ -58,7 +75,8 @@ export default class Login extends Command {
     });
 
     server.listen(serverPort, async () => {
-      this.log(theme.agent(`Opening browser to endpoint: ${theme.secondary(apiUrl)}`));
+      this.log(theme.agent(`Opening secure handshake in your browser...`));
+      this.log(theme.secondary(`If it doesn't open automatically, visit: `) + theme.secondary(loginUrl));
       await open(loginUrl);
     });
   }

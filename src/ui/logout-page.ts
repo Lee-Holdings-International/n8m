@@ -221,6 +221,10 @@ export const getLogoutPageHtml = (supabaseUrl: string, supabaseKey: string) => {
               const client = supabase.createClient(supabaseUrl, supabaseKey);
               client.auth.signOut().then(() => {
                   console.log('Web session terminated.');
+                  // Clear local storage just in case
+                  localStorage.clear();
+              }).catch(err => {
+                  console.error('Sign out error:', err);
               });
           }
 
@@ -228,12 +232,24 @@ export const getLogoutPageHtml = (supabaseUrl: string, supabaseKey: string) => {
           const timerEl = document.getElementById('timer');
           const interval = setInterval(() => {
               count--;
-              timerEl.innerText = count;
+              if (timerEl) timerEl.innerText = count;
               if (count <= 0) {
                   clearInterval(interval);
                   window.close();
                   // Fallback for browsers that block script-initiated close
-                  timerEl.parentElement.innerHTML = 'Session concluded. You may safely close this tab.';
+                  const container = document.querySelector('.logout-card');
+                  if (container) {
+                      container.innerHTML = \`
+                          <div class="logo-container">
+                              <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                  <polyline points="20 6 9 17 4 12"></polyline>
+                              </svg>
+                          </div>
+                          <h1>Handshake Severed</h1>
+                          <div class="subtext">Session concluded. You may safely close this tab.</div>
+                          <div class="version-tag">SYSTEM v0.0.1 // CHANNEL_CLOSED</div>
+                      \`;
+                  }
               }
           }, 1000);
       </script>

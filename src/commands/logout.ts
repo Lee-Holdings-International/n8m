@@ -20,11 +20,12 @@ export default class Logout extends Command {
 
     this.log(theme.info('Scrubbing local credentials...'));
 
+    const apiUrl = process.env.N8M_API_URL || 'http://localhost:3000/api/v1';
+
     try {
       const config = await ConfigManager.load();
       if (config.accessToken) {
          this.log(theme.info('Notifying server to invalidate session...'));
-         const apiUrl = process.env.N8M_API_URL || 'http://localhost:3000/api/v1';
          
          try {
            const { default: fetch } = await import('node-fetch');
@@ -53,6 +54,11 @@ export default class Logout extends Command {
       this.log(theme.done('Keychain credentials scrubbed.'));
       this.log(theme.done('Local configuration file cleaned.'));
       this.log(theme.done('Session terminated successfully.'));
+
+      // Trigger browser logout
+      this.log(theme.agent('Cleaning up web session...'));
+      const webLogoutUrl = `${apiUrl.replace('/api/v1', '')}/api/v1/auth/logout`;
+      await open(webLogoutUrl);
       
     } catch (error) {
       this.log(theme.fail('Failed to clear session: ' + (error instanceof Error ? error.message : String(error))));

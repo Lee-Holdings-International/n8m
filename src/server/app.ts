@@ -3,6 +3,7 @@ import { AIService } from '../services/ai.service.js';
 import { N8nService } from '../services/n8n.service.js';
 import { DbService } from '../services/db.service.js';
 import authRoutes from '../controllers/auth.controller.js';
+import billingRoutes from '../controllers/billing.controller.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const fastify = Fastify({ logger: true });
@@ -12,7 +13,48 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Register Middleware
   await fastify.register(import('../middleware/auth.js'));
+  await fastify.register(import('fastify-raw-body'), {
+    field: 'rawBody',
+    global: false,
+    encoding: false,
+    runFirst: true,
+  });
+
   await fastify.register(authRoutes, { prefix: '/api/v1' });
+  await fastify.register(billingRoutes, { prefix: '/api/v1/billing' });
+
+  // Global Error Handler
+  fastify.setErrorHandler(async (error, request, reply) => {
+    request.log.error(error);
+    const accept = request.headers['accept'] || '';
+    if (accept.includes('text/html')) {
+       const { getErrorPageHtml } = await import('../ui/error-page.js');
+       const html = getErrorPageHtml({
+         title: 'Engine Failure',
+         message: (error as Error).message || 'An unexpected error occurred in the orchestrator.',
+         code: (error as any).code || 'ERR_INTERNAL_SERVER',
+         retryUrl: '/'
+       });
+       return reply.type('text/html').code(reply.statusCode || 500).send(html);
+    }
+    return reply.send(error);
+  });
+
+  // 404 Handler
+  fastify.setNotFoundHandler(async (request, reply) => {
+    const accept = request.headers['accept'] || '';
+    if (accept.includes('text/html')) {
+       const { getErrorPageHtml } = await import('../ui/error-page.js');
+       const html = getErrorPageHtml({
+         title: 'Coordinate Not Found',
+         message: 'The requested path does not exist in the current workspace.',
+         code: 'ERR_NOT_FOUND',
+         retryUrl: '/api/v1/billing'
+       });
+       return reply.type('text/html').code(404).send(html);
+    }
+    return reply.code(404).send({ error: 'Not Found' });
+  });
 
   // Public Balance check
   fastify.get('/api/v1/balance', async (request: FastifyRequest, reply: FastifyReply) => {

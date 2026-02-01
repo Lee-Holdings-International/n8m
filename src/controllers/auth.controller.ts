@@ -16,7 +16,7 @@ const authRoutes: FastifyPluginAsync = async (fastify, opts) => {
     const { redirect_port, reauth } = request.query as { redirect_port?: string, reauth?: string };
     const supabaseUrl = process.env.SUPABASE_URL || '';
     const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
-    const redirectUrl = redirect_port ? `http://localhost:${redirect_port}/callback` : '';
+    const redirectUrl = redirect_port ? `http://localhost:${redirect_port}/callback` : '/api/v1/billing';
     const shouldReauth = reauth === 'true';
 
     const html = getLoginPageHtml(supabaseUrl, supabaseKey, redirectUrl, shouldReauth);
