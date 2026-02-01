@@ -1,75 +1,87 @@
-# n8m - Agentic n8n SaaS Platform
+# n8m: The Agentic CLI for n8n
 
-> **The AI-Powered Workflow Generator**: Create n8n workflows with natural
-> language, managed by an intelligent SaaS brain, deployed to your own
-> infrastructure.
+> **Professional Tooling for n8n Developers.** Bring CI/CD, Integration Testing,
+> and GitOps to your low-code workflows.
 
 [![TypeScript](https://badgen.net/badge/Built%20with/TypeScript/blue)](https://typescriptlang.org/)
 [![oclif](https://badgen.net/badge/CLI/oclif/purple)](https://oclif.io/)
 [![n8n](https://badgen.net/badge/n8n/Compatible/orange)](https://n8n.io)
 
-## Overview
-
-`n8m` is a hybrid SaaS platform that bridges the gap between **AI Generation**
-and **Local Execution**.
-
-- **Cloud Brain**: Uses our SaaS API (powered by Gemini) to generate complex
-  workflow JSON from your prompts.
-- **Local Control**: Your n8n credentials stay with you. The CLI deploys
-  generated workflows directly to your private n8n instance.
-
-## ✨ Features
-
-- **🗣️ Natural Language Generation**: Just describe what you want ("A workflow
-  that syncs Stripe to Sheets").
-- **🔐 Private Deployment**: Keep your n8n API keys local. We don't see them.
-- **💳 Usage-Based Billing**: Pay only for what you generate (1 Credit per
-  generation).
-- **🎨 Premium Design**: Built with a "Cyber-Dark" aesthetic (see
-  `design-tokens.json`).
+**Stop clicking. Start shipping.** You love n8n for its node-based power, but
+managing deployments and testing manually is a pain. `n8m` bridges the gap. It
+provides a command-line interface to **test**, **manage**, and **deploy** your
+workflows, treating them like first-class code.
 
 ---
 
-## 🚀 Getting Started
+## ⚡ Why n8m?
 
-### 1. Installation
+### 🧪 Headless Integration Testing
+
+Finally, run your workflows as automated test suites. `n8m test` spins up an
+**ephemeral environment**, injects your mock data, runs the flow, and validatess
+the output—all without opening a browser.
+
+- **AI-Driven Self-Repair**: If a test fails, `n8m` uses Google Gemini to
+  analyze the failure and propose a logic patch.
+- **CI/CD Ready**: Fail your build if the workflow breaks.
+- **Ephemeral**: Zero cleanup required. Temporary assets are purged
+  automatically.
+
+### 🚀 Smart Deployment & "Human-in-the-Loop"
+
+Treat your workflows like code. `n8m` ensures that what you deploy is actually
+verified.
+
+- **Interactive Verification**: After a successful test, it prompts:
+  `Deploy to instance? (Y/n)`.
+- **Shim Stripping**: Automatically removes test-specific shims (webhooks,
+  flattener nodes) before saving or deploying.
+- **Robust Auto-Fix**: Automatically handles activation errors by deactivating
+  sub-workflows on-the-fly during deployment.
+
+---
+
+## 🛠️ Installation
 
 ```bash
 npm install -g n8m
 ```
 
-### 2. Login (SaaS Auth)
+## 🚀 Quick Start
 
-Authenticate with the n8m cloud to enable AI generation.
+### 1. Authenticate & Configure
+
+Connect to the eco-system and configure your local n8n target.
 
 ```bash
+# Login to n8m services
 n8m login
+
+# Link your local/remote n8n instance
+n8m config --n8n-url https://n8n.your-company.com --n8n-key <your-api-key>
 ```
 
-- Opens your browser to authenticate.
-- Saves a secure API Key to `~/.n8m/config.json`.
+### 2. Test & Auto-Repair
 
-### 3. Configure Your n8n (Local Auth)
-
-Tell the CLI where to deploy your workflows.
+Validate a local workflow file or a remote workflow.
 
 ```bash
-n8m config --n8n-url http://localhost:5678/api/v1 --n8n-key <your-n8n-api-key>
+# Interactive test with AI self-repair
+n8m test
 ```
 
-- Supports local instances, n8n Cloud, or self-hosted servers.
+### 3. Deploy to Production
 
-### 4. Create & Deploy
-
-Generate a workflow and deploy it instantly.
+Push a local file to your active instance.
 
 ```bash
-n8m create "Weekly report generator that emails PDF summaries" --deploy
+n8m deploy ./workflows/seo-report.json --activate
 ```
 
-### 5. Check Balance
+### 4. Manage Account
 
-Monitor your generation credits.
+Check your service status.
 
 ```bash
 n8m balance
@@ -79,97 +91,52 @@ n8m balance
 
 ## 🏗️ Architecture
 
-### Hybrid Model (BYO-n8n)
+`n8m` is designed as a secure bridge.
 
 ```mermaid
 graph LR
-    User[User Terminal] -->|1. Prompt| SaaS[n8m SaaS API]
-    SaaS -->|2. Generate JSON| User
-    User -->|3. Deploy JSON| n8n[Your n8n Instance]
-    
-    subgraph Cloud
-    SaaS --> Gemini[Google Gemini]
-    SaaS --> Supabase[Auth / Billing]
-    end
-    
-    subgraph Local / Private
-    n8n
-    end
+    User[Developer Terminal]
+    n8n[n8n Instance]
+    SaaS[n8m Cloud API]
+    AI[Gemini AI]
+
+    User -->|1. Test/Deploy| n8n
+    User -.->|2. Auth/Sync| SaaS
+    SaaS -->|3. Repair Logic| AI
 ```
 
-### Directory Structure
-
-```
-n8m/
-├── src/
-│   ├── commands/     # CLI Commands (oclif)
-│   │   ├── create.ts # Call SaaS -> Deploy Local
-│   │   ├── login.ts  # Browser-based Auth Flow
-│   │   └── config.ts # Local Credential Manager
-│   ├── server/       # SaaS API (Fastify)
-│   └── services/     # Core Logic (AI, DB)
-├── schema.sql        # Supabase Database Schema
-├── design-tokens.json# UI/UX Design System
-├── DEPLOYMENT.md     # Production Hosting Guide
-└── .agent/skills/    # Antigravity Skills
-```
+- **Local First**: Deployment and Testing communicate directly with your n8n
+  instance.
+- **AI Augmented**: Self-healing patches are powered by industry-leading LLMs
+  integrated into the test runner.
 
 ---
 
-## 🛠️ For Developers
+## 🗺️ Roadmap
 
-Want to host the SaaS backend yourself?
-
-1. **Clone & Install**:
-   ```bash
-   git clone https://github.com/your-username/n8m.git
-   cd n8m
-   npm install
-   ```
-
-2. **Environment Setup**: Copy `.env.example` to `.env` and fill in your keys
-   (Gemini, Supabase, n8n).
-
-3. **Run Locally** (Recommended): Run the API Server and CLI Compiler in
-   parallel with hot-reloading:
-   ```bash
-   npm run dev
-   ```
-
-   Or run them separately:
-   ```bash
-   # Terminal 1: API Server
-   npm run watch:server
-
-   # Terminal 2: CLI Compiler
-   npm run watch:cli
-   ```
-
-   Then usage:
-   ```bash
-   npm run n8m -- login
-   ```
-
-   **Background Server (Daemon)**: You can also run the server in the background
-   using PM2:
-   ```bash
-   npm run server:start   # Start background server
-   npm run server:logs    # View logs
-   npm run server:status  # Check status
-   npm run server:stop    # Stop server
-   ```
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for full production hosting instructions
-(Railway + Supabase).
+- [x] **Headless Testing**: Run workflows as tests.
+- [x] **AI Self-Repair**: Automated logic patching for failing nodes.
+- [x] **Interactive Flow**: Human-in-the-loop Deploy vs Save logic.
+- [x] **Smart Deployment**: CLI-based workflow pushing with activation fallback.
+- [ ] **AI Workflow Generation**: Describe expectations, get JSON
+      (`n8m create`).
+- [ ] **Multi-Instance Sync**: Sync flows between Dev and Prod.
 
 ---
 
-## 📚 Documentation
+## 💻 Local Development
 
-- **[Deployment Guide](./DEPLOYMENT.md)** - How to host the API and n8n.
-- **[Design Tokens](./design-tokens.json)** - The visual language of the
-  platform.
+Want to hack on the CLI itself?
 
-## License
+```bash
+# Clone & Install
+git clone https://github.com/lcanady/n8m.git
+cd n8m
+npm install
 
-MIT
+# Run Locally
+npm run dev
+
+# Execute via local bin
+./bin/run.js help
+```

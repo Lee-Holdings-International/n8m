@@ -1,22 +1,25 @@
 import { Command } from '@oclif/core';
-import chalk from 'chalk';
+import { theme } from '../utils/theme.js';
 import { ConfigManager } from '../utils/config.js';
 
 export default class Balance extends Command {
   static description = 'Check your remaining credits';
 
   async run(): Promise<void> {
+    this.log(theme.brand());
     const config = await ConfigManager.load();
-    const apiUrl = process.env.N8N_API_URL || 'http://localhost:3000/api/v1';
+    const apiUrl = process.env.N8M_API_URL || 'http://localhost:3000/api/v1';
 
-    if (!config.apiKey) {
+    if (!config.accessToken) {
       this.error('Not logged in. Run \'n8m login\' first.');
     }
 
     try {
+      this.log(theme.agent('Fetching account details from System...'));
+      
       const response = await fetch(`${apiUrl}/balance`, {
         headers: {
-          'X-API-KEY': config.apiKey,
+          'Authorization': `Bearer ${config.accessToken}`,
           'Content-Type': 'application/json'
         }
       });
@@ -31,15 +34,22 @@ export default class Balance extends Command {
 
       const data = await response.json() as { credits: number };
       
-      this.log(chalk.bold('💰 Your Balance:'));
+      this.log('\n' + theme.primary.bold('◆ CREDITS BALANCE'));
+      this.log(theme.divider(30));
       
+      this.log(`${theme.label('Total Available')} ${theme.value(data.credits)}`);
+      
+      let status = '';
       if (data.credits > 5) {
-         this.log(chalk.green(`   ${data.credits} credits available`));
+         status = theme.success('Healthy');
       } else if (data.credits > 0) {
-         this.log(chalk.yellow(`   ${data.credits} credits remaining (low)`));
+         status = theme.warning('Low Balance');
       } else {
-         this.log(chalk.red(`   ${data.credits} credits. Top up required.`));
+         status = theme.error('Empty');
       }
+      
+      this.log(`${theme.label('Status')} ${status}`);
+      this.log(theme.divider(30));
 
     } catch (error) {
       this.error(`Failed to fetch balance: ${(error as Error).message}`);

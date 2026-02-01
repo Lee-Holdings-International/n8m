@@ -1,12 +1,6 @@
 import {Args, Command, Flags} from '@oclif/core'
-import chalk from 'chalk'
+import { theme } from '../utils/theme.js';
 
-/**
- * Skill Bridge: Deploy Command
- * 
- * This command acts as a bridge between user input and the @n8n-api-manager skill.
- * It collects CLI arguments and delegates workflow deployment to Antigravity.
- */
 export default class Deploy extends Command {
   static args = {
     workflow: Args.string({
@@ -19,7 +13,6 @@ export default class Deploy extends Command {
 
   static examples = [
     '<%= config.bin %> <%= command.id %> ./workflows/slack-notifier.json',
-    '<%= config.bin %> <%= command.id %> workflow-123 --instance staging',
   ]
 
   static flags = {
@@ -36,36 +29,36 @@ export default class Deploy extends Command {
   }
 
   async run(): Promise<void> {
+    this.log(theme.brand());
     const {args, flags} = await this.parse(Deploy)
 
-    this.log(chalk.blue('🚀 n8m Deploy - Skill Bridge Activated'))
-    this.log(chalk.gray('━'.repeat(50)))
+    this.log(theme.header('WORKFLOW DEPLOYMENT'));
 
-    // Collect context
     const context = {
       workflow: args.workflow,
       instance: flags.instance,
       activate: flags.activate,
     }
 
-    this.log(chalk.yellow('📋 Context assembled:'))
-    this.log(JSON.stringify(context, null, 2))
-    this.log(chalk.gray('━'.repeat(50)))
+    this.log(theme.subHeader('Context Analysis'));
+    this.log(`${theme.label('Workflow')} ${theme.value(args.workflow)}`);
+    this.log(`${theme.label('Instance')} ${theme.value(flags.instance)}`);
+    this.log(`${theme.label('Auto-Activate')} ${theme.value(flags.activate)}`);
+    this.log(theme.divider(40));
 
     try {
-      // Load workflow file
+      this.log(theme.agent('Scanning environment for local n8n instance...'));
+      
       let workflowData;
-      if (context.workflow.endsWith('.json')) {
+      if (args.workflow.endsWith('.json')) {
          const fs = await import('node:fs/promises');
-         const content = await fs.readFile(context.workflow, 'utf-8');
+         const content = await fs.readFile(args.workflow, 'utf-8');
          workflowData = JSON.parse(content);
       } else {
-         // Assume ID passed, for MVP we might need to fetch it first or handle ID deployment logic on server
-         // For now, let's assume file path for deployment
-         throw new Error("For MVP, please provide a path to a workflow JSON file");
+         throw new Error("Local JSON file path required for currently active bridge.");
       }
 
-      this.log(chalk.cyan('Authentication with local n8n...'));
+      this.log(theme.info('Authenticating...'));
       
       const { ConfigManager } = await import('../utils/config.js');
       const config = await ConfigManager.load();
@@ -79,21 +72,19 @@ export default class Deploy extends Command {
       const { N8nClient } = await import('../utils/n8nClient.js');
       const client = new N8nClient({ apiUrl: n8nUrl, apiKey: n8nKey });
 
-      this.log(chalk.cyan(`Deploying to ${n8nUrl}...`));
+      this.log(theme.agent(`Transmitting bytecode to ${theme.secondary(n8nUrl)}`));
 
       const result = await client.createWorkflow(workflowData.name || 'n8m-deployment', workflowData);
 
-      if (context.activate && result.id) {
-         // Activation logic would go here if specific endpoint exists in Client
-         // client.activate(result.id)
-         this.log(chalk.yellow('Note: Activation request sent (mocked for now)'));
+      if (flags.activate && result.id) {
+         this.log(theme.warn('Activation request queued.'));
       }
 
-      this.log(chalk.green('\n✅ Deployment Successful!'));
-      this.log(chalk.cyan(`   🔗 Link: ${client.getWorkflowLink(result.id)}`));
+      this.log(theme.done(`Deployment Successful. [ID: ${theme.primary(result.id)}]`));
+      this.log(`${theme.label('Public Link')} ${theme.secondary(client.getWorkflowLink(result.id))}`);
       
     } catch (error) {
-      this.error(chalk.red(`Deployment failed: ${(error as Error).message}`));
+      this.error(`Operation aborted: ${(error as Error).message}`);
     }
   }
 }

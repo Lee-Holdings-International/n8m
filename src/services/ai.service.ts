@@ -94,4 +94,67 @@ export class AIService {
       throw new Error("AI generated invalid JSON");
     }
   }
+  /**
+   * Generate mock data for a workflow execution
+   */
+  async generateMockData(context: string, model: string = "gemini-1.5-pro", previousFailures: string[] = []): Promise<any> {
+    let failureContext = "";
+    if (previousFailures.length > 0) {
+        failureContext = `\n\nIMPORTANT: The following attempts FAILED. Do NOT repeat these patterns.\nErrors:\n${previousFailures.join('\n')}`;
+    }
+
+    const systemPrompt = `You are a QA Data Generator.
+    Your task is to generate a realistic JSON payload to trigger an n8n workflow.
+    
+    You will be given the context of the workflow (name, nodes, logical rules).
+    You must deduce the required input structure to satisfy conditions (e.g. Switch nodes).
+    
+    Output ONLY valid JSON.
+    
+    Context: ${context}${failureContext}`;
+
+    const response = await this.generateContent(systemPrompt, { model });
+    
+    let cleanJson = response || "{}";
+    cleanJson = cleanJson.replace(/```json\n?|\n?```/g, "").trim();
+    
+    try {
+      return JSON.parse(cleanJson);
+    } catch (e) {
+      console.error("Failed to parse generated mock data", e);
+      return { message: "AI generation failed, fallback data" };
+    }
+    }
+
+  /**
+   * Diagnostic Repair: Fix a workflow based on execution error
+   */
+  async generateWorkflowFix(workflowJson: any, errorContext: string, model: string = "gemini-1.5-pro"): Promise<any> {
+      const prompt = `You are a Senior n8n Workflow Engineer.
+      A workflow failed during execution. Your task is to analyze the JSON and the Error, and provide a FIXED version of the workflow JSON.
+
+      Error Context:
+      ${errorContext}
+
+      Workflow JSON:
+      ${JSON.stringify(workflowJson, null, 2)}
+
+      Review the nodes involved in the error. 
+      If a node produced 0 items, check its input data mapping or filter conditions.
+      If a node crashed, check missing parameters.
+
+      Output ONLY valid JSON. No markdown. RETURN THE ENTIRE FIXED WORKFLOW JSON.
+      `;
+
+      const response = await this.generateContent(prompt, { model });
+      
+      try {
+        let cleanJson = response || "{}";
+        cleanJson = cleanJson.replace(/```json\n?|\n?```/g, "").trim();
+        return JSON.parse(cleanJson);
+      } catch (e) {
+         console.error("Failed to parse AI workflow fix", e);
+         throw new Error("AI generated invalid JSON for fix");
+      }
+  }
 }

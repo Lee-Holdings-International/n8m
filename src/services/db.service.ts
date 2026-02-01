@@ -6,10 +6,15 @@ export class DbService {
 
   private constructor() {
     const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    // Prioirtize Service Role Key for backend operations to bypass RLS
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      console.warn('⚠️ SUPABASE_URL or SUPABASE_ANON_KEY not set. Database features will fail.');
+      console.warn('⚠️ SUPABASE_URL or keys not set. Database features will fail.');
+    }
+    
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        console.warn('⚠️ SUPABASE_SERVICE_ROLE_KEY missing. API key validation may fail due to RLS.');
     }
 
     this.client = createClient(

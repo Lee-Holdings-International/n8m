@@ -95,7 +95,7 @@ Once deployed:
 1. **Login**:
    ```bash
    # Set the remote API URL via env var or config
-   export N8N_API_URL=https://n8m-api.up.railway.app/api/v1 
+   export N8M_API_URL=https://n8m-api.up.railway.app/api/v1 
    n8m login
    ```
 2. **Check Balance**:
