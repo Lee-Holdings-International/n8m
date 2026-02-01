@@ -652,6 +652,22 @@ export default class Test extends Command {
   }
 
   /**
+   * Sanitize workflow data for Public API (Remove read-only fields)
+   */
+  private sanitizeWorkflow(data: any): any {
+      const allowedKeys = ['name', 'nodes', 'connections', 'settings', 'staticData', 'pinData', 'meta'];
+      const sanitized: any = {};
+      
+      for (const key of allowedKeys) {
+          if (data[key] !== undefined) {
+              sanitized[key] = data[key];
+          }
+      }
+      
+      return sanitized;
+  }
+
+  /**
    * Remove temporary test shims (Webhook + Flattener) from workflow data
    */
   private stripShim(workflowData: any): any {
@@ -697,7 +713,7 @@ export default class Test extends Command {
       if (!save) return;
 
       for (const [id, def] of deployedDefinitions.entries()) {
-          const cleanData = this.stripShim(def.data);
+          const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
           cleanData.name = def.name;
           
           let targetPath = '';
@@ -754,7 +770,7 @@ export default class Test extends Command {
    */
   private async deployWorkflows(deployedDefinitions: Map<string, any>, client: N8nClient) {
       for (const [tempId, def] of deployedDefinitions.entries()) {
-          const cleanData = this.stripShim(def.data);
+          const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
           cleanData.name = def.name;
           
           if (def.realId) {
