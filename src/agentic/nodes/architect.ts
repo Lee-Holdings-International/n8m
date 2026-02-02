@@ -9,9 +9,30 @@ export const architectNode = async (state: typeof TeamState.State) => {
   }
 
   // Pass-through if we already have a workflow (Repairs/Testing mode)
-  if (state.workflowJson) {
-      return {};
-  }
+  // BUT if we have a goal that implies modification, we should probably still generate a spec?
+  // For now, let's allow spec generation even if workflowJson exists, so the Engineer can use the spec + old workflow to make new one.
+  // The logic in Architect assumes "generateSpec" creates a NEW spec from scratch.
+  // We might need a "modifySpec" or just rely on the Engineer to interpret the goal + existing workflow.
+  
+  // If we skip the architect, we go straight to Engineer?
+  // The graph edges are: START -> architect -> engineer.
+  // If we return empty here, 'spec' is undefined in state.
+  // Engineer checks state.spec.
+  
+  // If we want to support modification, the Architect should probably analyze the request vs the current workflow.
+  // However, for the first MVP, if we return empty, the Engineer will run.
+  // Does Engineer handle "no spec" but "has workflowJson" + "userGoal"?
+  // Let's assume we want the Architect to generate a plan (Spec) for the modification.
+  
+  // So we REMOVE this early return, or condition it on "isRepair" vs "isModify".
+  // Since we don't have an explicit flag, we can just let it run.
+  // The prompt for generateSpec might need to know about the existing workflow?
+  // Currently generateSpec only sees the goal.
+  
+  // Let's comment it out for now to allow Architect to run.
+  // if (state.workflowJson) {
+  //     return {};
+  // }
 
   try {
     const spec = await aiService.generateSpec(state.userGoal);

@@ -3,7 +3,7 @@ import {Args, Command, Flags} from '@oclif/core'
 import { theme } from '../utils/theme.js'
 import {N8nClient} from '../utils/n8nClient.js'
 import {ConfigManager} from '../utils/config.js'
-import { runAgenticWorkflowStream, graph, resumeAgenticWorkflow } from '../agentic/graph.js';
+import { graph, resumeAgenticWorkflow } from '../agentic/graph.js';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -112,7 +112,7 @@ export default class Modify extends Command {
         if (choices.length === 0) this.error('No workflows found locally or on n8n instance.');
 
         const { selection } = await inquirer.prompt([{
-            type: 'list',
+            type: 'select',
             name: 'selection',
             message: 'Select a workflow to modify:',
             choices,
@@ -169,10 +169,6 @@ export default class Modify extends Command {
     };
 
     try {
-        // Note: Using runAgenticWorkflowStream currently doesn't easily support passing initialState 
-        // in the current exported signature, so let's adjust or use runAgenticWorkflow then stream manually.
-        // Actually, let's just use graph.stream directly here to be safe and match test.ts pattern if needed.
-        
         const stream = await graph.stream({
             ...initialState,
             revisionCount: 0,
@@ -238,13 +234,18 @@ export default class Modify extends Command {
     // 5. POST-MODIFICATION ACTIONS
     const modifiedWorkflow = lastWorkflowJson.workflows ? lastWorkflowJson.workflows[0] : lastWorkflowJson;
     
+    // Preserve ID if it existed in the original and is missing in the new
+    if (workflowData.id) {
+        modifiedWorkflow.id = workflowData.id;
+    }
+    
     // Standardize naming
     if (!modifiedWorkflow.name.toLowerCase().includes('modified')) {
         // maybe add a suffix? Or just keep it. 
     }
 
     const { action } = await inquirer.prompt([{
-        type: 'list',
+        type: 'select', 
         name: 'action',
         message: 'Modification complete. What would you like to do?',
         choices: [
@@ -279,10 +280,15 @@ export default class Modify extends Command {
             this.log(`${theme.label('Link')} ${theme.secondary(client.getWorkflowLink(result.id))}`);
         }
     } else if (action === 'test') {
-        // For 'test', we'll save to a temp file and then suggest running n8m test
+        // Automatically run the test command
         const tempPath = path.join(process.cwd(), '.n8m-temp-modified.json');
         await fs.writeFile(tempPath, JSON.stringify(modifiedWorkflow, null, 2));
-        this.log(theme.info(`Workflow staged. Run: ${theme.value(`n8m test ${tempPath}`)}`));
+        this.log(theme.info(`Workflow staged. Running ephemeral test...`));
+        
+        // Execute Test command
+        // We import Test to avoid circular dependency issues if we just used runCommand with string?
+        // Actually runCommand is cleaner.
+        await this.config.runCommand('test', [tempPath]);
     }
 
     this.log(theme.done('Modification Process Complete.'));

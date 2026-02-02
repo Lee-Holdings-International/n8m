@@ -7,9 +7,10 @@ import { MultilineInput } from 'ink-multiline-input';
 
 interface SmartPromptProps {
   onDone: (value: string) => void;
+  title?: string;
 }
 
-const SmartPromptElement: React.FC<SmartPromptProps> = ({ onDone }) => {
+const SmartPromptElement: React.FC<SmartPromptProps> = ({ onDone, title }) => {
   const [mode, setMode] = useState<'single' | 'multi'>('single');
   const [value, setValue] = useState('');
   const [multiValue, setMultiValue] = useState('');
@@ -45,7 +46,7 @@ const SmartPromptElement: React.FC<SmartPromptProps> = ({ onDone }) => {
     return (
       <Box>
         <Text color="green">? </Text>
-        <Text bold>Describe the workflow (use ``` for multiline): </Text>
+        <Text bold>{title || 'Describe the workflow (use ``` for multiline): '} </Text>
         <TextInput
           value={value}
           onChange={setValue}
@@ -59,7 +60,7 @@ const SmartPromptElement: React.FC<SmartPromptProps> = ({ onDone }) => {
     <Box flexDirection="column" paddingX={1} marginBottom={1}>
       <Box>
         <Text color="green">✔ </Text>
-        <Text bold>Describe the workflow (use ``` for multiline): </Text>
+        <Text bold>{title || 'Describe the workflow (use ``` for multiline): '} </Text>
         <Text color="cyan">```</Text>
       </Box>
       <Box marginTop={1}>
@@ -90,7 +91,7 @@ const SmartPromptElement: React.FC<SmartPromptProps> = ({ onDone }) => {
   );
 };
 
-export async function promptMultiline(): Promise<string> {
+export async function promptMultiline(message?: string): Promise<string> {
   return new Promise((resolve) => {
     let result = '';
     const instance = render(
@@ -98,6 +99,7 @@ export async function promptMultiline(): Promise<string> {
         onDone={(val) => {
           result = val;
         }}
+        title={message}
       />
     );
     instance.waitUntilExit().then(() => {

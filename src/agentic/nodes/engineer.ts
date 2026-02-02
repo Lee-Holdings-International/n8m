@@ -1,9 +1,27 @@
 import { AIService } from "../../services/ai.service.js";
 import { TeamState } from "../state.js";
+import { NodeDefinitionsService } from "../../services/node-definitions.service.js";
 
 export const engineerNode = async (state: typeof TeamState.State) => {
   const aiService = AIService.getInstance();
+
+  // RAG: Load and Search Node Definitions
+  const nodeService = NodeDefinitionsService.getInstance();
+  await nodeService.loadDefinitions();
   
+  // Extract keywords from goal + spec
+  const queryText = (state.userGoal + (state.spec ? ` ${state.spec.suggestedName} ${state.spec.description}` : "")).replace(/\n/g, " ");
+  
+  // Search for relevant nodes (limit 8 to save context)
+  const relevantDefs = nodeService.search(queryText, 8);
+  const ragContext = relevantDefs.length > 0 
+      ? `\n\n[AVAILABLE NODE SCHEMAS - USE THESE EXACT PARAMETERS]\n${nodeService.formatForLLM(relevantDefs)}` 
+      : "";
+
+  if (relevantDefs.length > 0) {
+      console.log(`[Engineer] RAG: Found ${relevantDefs.length} relevant node schemas.`);
+  }
+
   // Self-Correction Loop Check
   if (state.validationErrors && state.validationErrors.length > 0) {
       console.log("🔧 Engineer is fixing the workflow based on QA feedback...");
@@ -49,6 +67,7 @@ export const engineerNode = async (state: typeof TeamState.State) => {
        
        Specification:
        ${JSON.stringify(state.spec, null, 2)}
+       ${ragContext}
        
        IMPORTANT:
        1. Desciptive Naming: Name nodes descriptively (e.g. "Fetch Bitcoin Price" instead of "HTTP Request").

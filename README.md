@@ -87,7 +87,21 @@ If a session is paused or fails, resume it using its Unique ID.
 n8m resume <thread-id>
 ```
 
-### 4. Test & Auto-Repair
+### 4. Intelligent Modification
+
+Modify existing workflows using natural language. This command preserves your
+workflow ID to ensure you update the correct target, and can automatically
+trigger a test run.
+
+```bash
+# Modify a local file
+n8m modify ./workflows/my-flow.json
+
+# Modify an active workflow from your instance
+n8m modify --multiline
+```
+
+### 5. Test & Auto-Repair
 
 Validate local files or existing workflows with the deep repair loop.
 

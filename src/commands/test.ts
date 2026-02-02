@@ -184,6 +184,9 @@ export default class Test extends Command {
           const content = await fs.readFile(args.workflow, 'utf-8');
           workflowData = JSON.parse(content);
           workflowName = workflowData.name || 'Untitled';
+          if (workflowData.id) {
+              rootRealTargetId = workflowData.id;
+          }
           
           const nodes = workflowData.nodes || [];
           for (const node of nodes) {

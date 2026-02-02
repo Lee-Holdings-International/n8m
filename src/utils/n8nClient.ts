@@ -229,7 +229,11 @@ export class N8nClient {
    * 2. Activate it
    * 3. Call the webhook -> Returns the node types
    */
-  async getNodeTypes(): Promise<string[]> {
+  /**
+   * Get all installed node types via Probe Workflow (Webhook)
+   * Returns full node type objects including parameters, not just names.
+   */
+  async getNodeTypes(): Promise<any[]> {
     const probeId = `probe-${Math.random().toString(36).substring(7)}`;
     const probePath = `n8m-probe-${Math.random().toString(36).substring(7)}`;
     let workflowId: string | null = null;
@@ -304,8 +308,6 @@ export class N8nClient {
       await this.activateWorkflow(id);
       
       // 3. Trigger
-      // Construct webhook URL. `this.apiUrl` is like 'http://localhost:5678/api/v1'
-      // Webhook URL is 'http://localhost:5678/webhook/probePath'
       const baseUrl = this.apiUrl.replace('/api/v1', '');
       const webhookUrl = `${baseUrl}/webhook/${probePath}`;
       
@@ -322,21 +324,13 @@ export class N8nClient {
       
       const result = await response.json();
       
-      // The result should be the array of node types directly (from the internal API response)
-      // or wrapped in the n8n item structure. 
-      // Internal API `rest/node-types` usually returns an array of objects.
-      
-      // If it's the n8n execution wrapper (since we used lastNode responseMode?):
-      // Actually 'lastNode' mode usually returns the JSON data of the last node.
-      
-      // Check if it's the direct array
+      // Return full objects
       if (Array.isArray(result)) {
-           return result.map((n: any) => n.name);
+           return result;
       } 
       
-      // Check if it's wrapped in `data`
       if (result.data && Array.isArray(result.data)) {
-           return result.data.map((n: any) => n.name);
+           return result.data;
       }
 
       return [];
