@@ -2,7 +2,6 @@ import { TeamState } from "../state.js";
 import { theme } from "../../utils/theme.js";
 
 export const reviewerNode = async (state: typeof TeamState.State) => {
-  console.log("🧐 Reviewer is inspecting the blueprint...");
   const workflowJson = state.workflowJson;
   const validationErrors: string[] = [];
 
@@ -116,14 +115,13 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
   // If we see an OpenAI node, warn if no credential ID is placeholder? (Skip for now)
 
   if (validationErrors.length > 0) {
-      console.log(theme.fail(`Reviewer found ${validationErrors.length} issues.`));
       return {
           validationStatus: 'failed',
           validationErrors: validationErrors,
       };
   }
 
-  console.log(theme.success("Reviewer passed the blueprint."));
+  // console.log(theme.success("Reviewer passed the blueprint."));
   return {
       validationStatus: 'passed',
       // Clear errors from previous runs

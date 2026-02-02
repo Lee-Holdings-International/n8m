@@ -29,13 +29,25 @@ the output—all without opening a browser.
 - **Ephemeral**: Zero cleanup required. Temporary assets are purged
   automatically.
 
-### 🚀 Agentic Workflow Creation
+### 🤖 Multi-Agent Orchestration (Superpowers)
 
-Describe your idea, and `n8m` builds the blueprint and the JSON for you.
+`n8m` now features a state-of-the-art agentic graph that distributes work across
+specialized AI nodes:
 
-- **Automatic Naming & Linking**: Handles parent/child workflow linking and
-  descriptive naming out-of-the-box.
-- **Human-in-the-Loop**: Review the AI's blueprint before it starts building.
+- **Architect**: Designs the system blueprint and identifies required workflows.
+- **Engineer**: Generates the actual workflow JSON, with parallel execution for
+  speed.
+- **Reviewer**: Performs static analysis to catch common n8n misconfigurations.
+- **QA**: Automatically validates the generated logic against your goal.
+
+### 💾 Persistent Memory & HITL
+
+- **Human-in-the-Loop**: The agent pauses before critical steps (like QA) to
+  allow you to review progress.
+- **Session Persistence**: All work is saved to a local SQLite database. If an
+  agent crashes or you pause it, you can pick up exactly where you left off.
+- **Continuous Learning**: The self-repair loop now uses past failures to inform
+  better patches in real-time.
 
 ---
 
@@ -67,7 +79,15 @@ Generate a complete system of workflows from a simple description.
 n8m create "RSS feed to Slack with a sub-workflow for message formatting"
 ```
 
-### 3. Test & Auto-Repair
+### 3. Resume & Persistent sessions
+
+If a session is paused or fails, resume it using its Unique ID.
+
+```bash
+n8m resume <thread-id>
+```
+
+### 4. Test & Auto-Repair
 
 Validate local files or existing workflows with the deep repair loop.
 
@@ -82,15 +102,25 @@ n8m test ./workflows/my-flow.json
 `n8m` is designed as a secure bridge.
 
 ```mermaid
-graph LR
-    User[Developer Terminal]
-    n8n[n8n Instance]
-    SaaS[n8m Cloud API]
-    AI[Gemini AI]
-
-    User -->|1. Test/Deploy| n8n
-    User -.->|2. Auth/Sync| SaaS
-    SaaS -->|3. Repair Logic| AI
+graph TD
+    User[Developer] -->|1. Goal| Architect
+    
+    subgraph "n8m Agentic Core"
+    Architect -->|2. Spec| Engineer
+    Engineer -->|3. JSON| Reviewer
+    Reviewer -->|4. Fix?| Engineer
+    Reviewer -->|5. Verify| QA
+    QA -->|6. Retry| Engineer
+    end
+    
+    Engineer -.->|Parallel Build| GenAI[Gemini AI]
+    QA -->|Success| Save[Local Files]
+    
+    subgraph Persistence
+    DB[(SQLite State)]
+    end
+    Architect --- DB
+    Engineer --- DB
 ```
 
 - **Local First**: Deployment and Testing communicate directly with your n8n
@@ -104,18 +134,18 @@ graph LR
 
 ### 📦 Latest Releases
 
-- [x] **Global Self-Repair**: Automated recovery for both staging and logical
-      failures.
-- [x] **Agentic Creator**: Multi-workflow generation with automatic linking.
-- [x] **Universal Selection**: Fuzzy search for workflows on your instance or
-      local files.
+- [x] **Agentic Graph**: Specialized nodes (Architect, Engineer, QA) for complex
+      builds.
+- [x] **State Persistence**: SQLite-backed checkpointer for session recovery.
+- [x] **HITL Interrupts**: Native support for pausing and resuming workflows.
+- [x] **Parallel Generation**: Scalable workflow creation for multi-component
+      systems.
 
-### ⚡ Coming Soon: The "Edit" Loop
+### ⚡ Coming Soon
 
-- [ ] **Modify Existing**: Soon you'll be able to download an existing workflow,
-      provide an AI prompt to "Modify the Slack node to use a different
-      channel", verify it with a test, and upload the fix back—all in one
-      command.
+- [ ] **Native n8n Canvas Integration**: Visualize the agent's progress directly
+      inside the n8n UI.
+- [ ] **Collaborative Agents**: Invite multiple agents to work on a single goal.
 
 ---
 

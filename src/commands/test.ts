@@ -271,8 +271,8 @@ export default class Test extends Command {
       const remappedIds = new Map<string, string>();
       
       if (dependencyMap.size > 0) {
-          this.log(theme.subHeader('DEPENDENCY LINKING'));
-          this.log(theme.info(`Found ${dependencyMap.size} dependencies. Deploying ephemeral copies...`));
+          // this.log(theme.subHeader('DEPENDENCY LINKING'));
+          // this.log(theme.info(`Found ${dependencyMap.size} dependencies. Deploying ephemeral copies...`));
 
           for (const [originalId, info] of dependencyMap.entries()) {
               try {
@@ -406,8 +406,6 @@ export default class Test extends Command {
       // Check if paused
       let snapshot = await graph.getState({ configurable: { thread_id: ephemeralThreadId } });
       if (snapshot.next && snapshot.next.length > 0) {
-          this.log(theme.agent(`Workflow paused at ${snapshot.next.join(', ')} (HITL Interruption)`));
-          
           if (flags.headless) {
               this.log(theme.info("Headless mode active. Auto-resuming..."));
               result = await resumeAgenticWorkflow(ephemeralThreadId);
