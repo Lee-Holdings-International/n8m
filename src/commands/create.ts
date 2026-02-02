@@ -1,15 +1,12 @@
 import {Args, Command, Flags} from '@oclif/core'
 import { theme } from '../utils/theme.js';
-import { AIService } from '../services/ai.service.js';
-import { ConfigManager } from '../utils/config.js';
-import { N8nClient } from '../utils/n8nClient.js';
+import { runAgenticWorkflowStream } from '../agentic/graph.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import inquirer from 'inquirer';
-// import { render } from 'ink'; // Removed
-// import React from 'react'; // Removed
-// import { CreateChat } from '../ui/components/CreateChat.js'; // Removed
+import { randomUUID } from 'node:crypto';
+import { graph, resumeAgenticWorkflow } from '../agentic/graph.js';
 
 export default class Create extends Command {
   static args = {
@@ -19,34 +16,24 @@ export default class Create extends Command {
     }),
   }
 
-  static description = 'Generate n8n workflows from natural language using Gemini AI'
+  static description = 'Generate n8n workflows from natural language using Gemini AI Agent'
 
   static examples = [
     '<%= config.bin %> <%= command.id %> "Send a telegram alert when I receive an email"',
     'echo "Slack to Discord sync" | <%= config.bin %> <%= command.id %>',
-    '<%= config.bin %> <%= command.id %> --deploy --activate',
+    '<%= config.bin %> <%= command.id %> --output ./my-workflow.json',
   ]
 
   static flags = {
     deploy: Flags.boolean({
       char: 'd',
-      description: 'Deploy the generated workflow to n8n instance',
+      description: 'Deploy the generated workflow to n8n instance (Not yet fully integrated with agent)',
       default: false,
-    }),
-    activate: Flags.boolean({
-      char: 'a',
-      description: 'Activate workflow after deployment (requires --deploy)',
-      default: false,
-      dependsOn: ['deploy'],
+      hidden: true,
     }),
     output: Flags.string({
       char: 'o',
       description: 'Path to save the generated workflow JSON',
-    }),
-    instance: Flags.string({
-      char: 'i',
-      description: 'n8n instance name (from config)',
-      default: 'production',
     }),
     multiline: Flags.boolean({
       char: 'm',
@@ -117,89 +104,94 @@ export default class Create extends Command {
         this.error('Description is required.');
     }
 
-    const ai = AIService.getInstance();
-
-    // 2. CLARIFY (PLANNING)
-    let spec: any = null;
-    let isApproved = false;
-    let currentDescription = description;
-
-    while (!isApproved) {
-        this.log(theme.info('\nDrafting Blueprint...'));
-        try {
-            if (!spec) {
-                spec = await ai.generateSpec(currentDescription);
-            } else {
-                spec = await ai.refineSpec(spec, currentDescription);
-            }
-        } catch (error) {
-            this.error(`Failed to generate plan: ${(error as Error).message}`);
-        }
-
-        // Display Plan
-        this.displaySpec(spec);
-
-        // Check for required clarifications
-        if (spec.questions && spec.questions.length > 0) {
-            this.log(theme.warn('\nClarification Needed:'));
-            spec.questions.forEach((q: string) => this.log(`- ${q}`));
-
-            const { answer } = await inquirer.prompt([{
-                type: 'input',
-                name: 'answer',
-                message: 'Please answer the above to refine the plan (or press Enter to skip):',
-            }]);
-
-            if (answer && answer.trim()) {
-                currentDescription = answer;
-                continue; // Loop back to refine
-            }
-        }
-
-        const { action } = await inquirer.prompt([{
-            type: 'list',
-            name: 'action',
-            message: 'How would you like to proceed?',
-            choices: [
-                { name: 'Build this workflow', value: 'build' },
-                { name: 'Refine/Modify plan', value: 'refine' },
-                { name: 'Cancel', value: 'cancel' }
-            ],
-            default: 'build'
-        }]);
-
-        if (action === 'cancel') {
-            this.log('Operation cancelled.');
-            return;
-        } else if (action === 'build') {
-            isApproved = true;
-        } else {
-            const { feedback } = await inquirer.prompt([{
-                type: 'input',
-                name: 'feedback',
-                message: 'What should be changed?',
-            }]);
-            currentDescription = feedback; // Use feedback as the new "prompt" for refinement
-        }
-    }
-
-    // 3. BUILD
-    this.log(theme.agent('\nSynthesizing Workflow...'));
-    let generatedResult: any;
-    try {
-        generatedResult = await ai.generateWorkflowFromSpec(spec);
-    } catch (error) {
-        this.error(`Failed to build workflow: ${(error as Error).message}`);
-    }
-
-    // Normalize to array
-    const workflows = generatedResult.workflows || [generatedResult];
+    // 2. AGENTIC EXECUTION
+    const threadId = randomUUID();
+    this.log(theme.info(`\nInitializing Agentic Workflow for: "${description}" (Session: ${threadId})`));
     
-    // 4. SAVE (Save All First)
+    let lastWorkflowJson: any = null;
+    let lastSpec: any = null;
+    
+    try {
+        const stream = await runAgenticWorkflowStream(description, threadId);
+        
+        for await (const event of stream) {
+            // event keys correspond to node names that just finished
+            const nodeName = Object.keys(event)[0];
+            const stateUpdate = (event as Record<string, any>)[nodeName];
+            
+            if (nodeName === 'architect') {
+                this.log(theme.agent(`🏗️  Architect: Blueprint designed.`));
+                if (stateUpdate.spec?.suggestedName) {
+                    this.log(`   Goal: ${theme.value(stateUpdate.spec.suggestedName)}`);
+                    lastSpec = stateUpdate.spec;
+                }
+            } else if (nodeName === 'engineer') {
+               this.log(theme.agent(`⚙️  Engineer: Workflow code generated/updated.`));
+               if (stateUpdate.workflowJson) {
+                   lastWorkflowJson = stateUpdate.workflowJson;
+               }
+            } else if (nodeName === 'qa') {
+               const status = stateUpdate.validationStatus;
+               if (status === 'passed') {
+                   this.log(theme.success(`🧪 QA: Validation Passed!`));
+               } else {
+                   this.log(theme.fail(`🧪 QA: Validation Failed.`));
+                   if (stateUpdate.validationErrors && stateUpdate.validationErrors.length > 0) {
+                       stateUpdate.validationErrors.forEach((e: string) => this.log(theme.error(`   - ${e}`)));
+                   }
+                   this.log(theme.warn(`   Looping back to Engineer for repairs...`));
+               }
+            }
+        }
+
+        // Check for interrupt/pause
+        const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+        if (snapshot.next.length > 0) {
+            this.log(theme.warn(`\n⏸️  Workflow Paused at step: ${snapshot.next.join(', ')}`));
+            
+             const { resume } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'resume',
+                message: 'Review completed. Resume workflow execution?',
+                default: true
+            }]);
+
+            if (resume) {
+                 this.log(theme.agent("Resuming..."));
+                 // Resume recursively/iteratively? 
+                 // For now, simple resume call. ideally we'd stream again.
+                 // But wait, resumeAgenticWorkflow returns the FINAL result, not a stream.
+                 // We should probably loop if we want to stream again, but let's just create a simple resume handling here.
+                 // Or we can just call resumeAgenticWorkflow and print the final result.
+                 
+                 const result = await resumeAgenticWorkflow(threadId);
+                 if (result.validationStatus === 'passed') {
+                     this.log(theme.success(`🧪 QA (Resumed): Validation Passed!`));
+                     if (result.workflowJson) lastWorkflowJson = result.workflowJson;
+                 } else {
+                     this.log(theme.fail(`🧪 QA (Resumed): Final Status: ${result.validationStatus}`));
+                 }
+            } else {
+                this.log(theme.info(`Session persisted. Resume later with: n8m resume ${threadId}`));
+                return;
+            }
+        }
+
+    } catch (error) {
+        this.error(`Agent ran into an unrecoverable error: ${(error as Error).message}`);
+    }
+
+    if (!lastWorkflowJson) {
+        this.error('Agent finished but no workflow JSON was produced.');
+    }
+
+    // 3. SAVE
+    // Normalize to array
+    const workflows = lastWorkflowJson.workflows || [lastWorkflowJson];
     const savedResources: { path: string, name: string, original: any }[] = [];
 
     for (const workflow of workflows) {
-        let workflowName = workflow.name || spec.suggestedName || 'generated-workflow';
+        let workflowName = workflow.name || (lastSpec && lastSpec.suggestedName) || 'generated-workflow';
         const sanitizedName = workflowName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
         
         let targetFile = flags.output;
@@ -221,63 +213,7 @@ export default class Create extends Command {
         savedResources.push({ path: targetFile, name: workflowName, original: workflow });
         this.log(theme.success(`\nWorkflow saved to: ${targetFile}`));
     }
-
-    // 5. TEST (Test All After Saving)
-    for (const resource of savedResources) {
-        this.log(theme.info(`\nRunning QA Validation for ${resource.name}...`));
-        try {
-            const { spawn } = await import('child_process');
-             await new Promise<void>((resolve) => {
-                const args = [process.argv[1], 'test', resource.path, '--no-brand', '--validate-only'];
-                
-                const child = spawn(process.argv[0], args, {
-                    stdio: 'inherit' 
-                });
-
-                child.on('error', (err) => {
-                    this.warn(`Failed to start test runner: ${err.message}`);
-                    resolve();
-                });
-
-                child.on('close', (code) => {
-                    if (code === 0) {
-                        this.log(theme.success(`QA Passed: ${resource.name}`));
-                    } else {
-                        this.log(theme.warn(`QA Finished with exit code ${code} for ${resource.name}.`));
-                    }
-                    resolve();
-                });
-            });
-        } catch (error) {
-            this.warn(`Could not run test runner: ${(error as Error).message}`);
-        }
-    }
-  }
-
-  private displaySpec(spec: any) {
-    this.log(`\n${theme.secondary.bold('--- WORKFLOW SPECIFICATION ---')}`);
-    if (spec.suggestedName) {
-        this.log(`${theme.label('Title')} ${theme.value(spec.suggestedName)}`);
-    }
-    this.log(`${theme.label('Goal')} ${theme.value(spec.goal)}`);
     
-    this.log(`\n${theme.secondary.bold('Proposed Tasks:')}`);
-    (spec.tasks || []).forEach((task: any, i: number) => {
-        let taskText = task;
-        if (typeof task === 'object' && task !== null) {
-            // Prioritize descriptive fields, then find any string, then JSON stringify
-            taskText = task.description || task.task || task.summary || Object.values(task).find(v => typeof v === 'string') || JSON.stringify(task);
-        }
-        this.log(`${theme.primary('  ' + (i + 1) + '.')} ${theme.foreground(taskText)}`);
-    });
-
-    this.log(`\n${theme.secondary.bold('Building Blocks:')}`);
-    this.log(`  ${(spec.nodes || []).join(' → ')}`);
-
-    if (spec.assumptions && spec.assumptions.length > 0) {
-        this.log(`\n${theme.warn('Assumptions:')}`);
-        spec.assumptions.forEach((a: string) => this.log(`  - ${a}`));
-    }
-    this.log(theme.divider(40));
+    this.log(theme.done('Agentic Workflow Complete.'));
   }
 }

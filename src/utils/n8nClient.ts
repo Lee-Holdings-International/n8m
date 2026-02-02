@@ -222,6 +222,138 @@ export class N8nClient {
   }
 
   /**
+   * Get all installed node types via Probe Workflow (Webhook)
+   * 
+   * Strategy:
+   * 1. Create a workflow with Webhook -> HTTP Request (Internal API)
+   * 2. Activate it
+   * 3. Call the webhook -> Returns the node types
+   */
+  async getNodeTypes(): Promise<string[]> {
+    const probeId = `probe-${Math.random().toString(36).substring(7)}`;
+    const probePath = `n8m-probe-${Math.random().toString(36).substring(7)}`;
+    let workflowId: string | null = null;
+    
+    try {
+      const internalApiUrl = this.apiUrl + '/node-types';
+      
+      const probeWorkflow = {
+          name: `[n8m:system] Node Probe ${probeId}`,
+          nodes: [
+            {
+              parameters: {
+                httpMethod: "GET",
+                path: probePath,
+                responseMode: "lastNode", 
+                options: {}
+              },
+              id: "webhook",
+              name: "ProbeWebhook",
+              type: "n8n-nodes-base.webhook",
+              typeVersion: 1,
+              position: [400, 300],
+              webhookId: probePath
+            },
+            {
+              parameters: {
+                url: internalApiUrl,
+                method: "GET",
+                authentication: "none",
+                sendHeaders: true,
+                headerParameters: {
+                  parameters: [
+                    {
+                      name: "X-N8N-API-KEY",
+                      value: this.apiKey
+                    }
+                  ]
+                },
+                options: {}
+              },
+              id: "http-request",
+              name: "FetchNodes",
+              type: "n8n-nodes-base.httpRequest",
+              typeVersion: 4.1,
+              position: [600, 300]
+            }
+          ],
+          connections: {
+            "ProbeWebhook": {
+              main: [[{ node: "FetchNodes", type: "main", index: 0 }]]
+            }
+          },
+          settings: {
+              saveManualExecutions: false,
+              callerPolicy: 'workflowsFromSameOwner'
+          }
+      };
+
+      // Header Injection
+      (probeWorkflow.nodes[1] as any).parameters.authentication = 'none';
+      (probeWorkflow.nodes[1] as any).parameters.headerParameters = {
+          parameters: [
+              { name: 'X-N8N-API-KEY', value: this.apiKey }
+          ]
+      };
+      
+      // 1. Create
+      const { id } = await this.createWorkflow(probeWorkflow.name, probeWorkflow);
+      workflowId = id;
+      
+      // 2. Activate
+      await this.activateWorkflow(id);
+      
+      // 3. Trigger
+      // Construct webhook URL. `this.apiUrl` is like 'http://localhost:5678/api/v1'
+      // Webhook URL is 'http://localhost:5678/webhook/probePath'
+      const baseUrl = this.apiUrl.replace('/api/v1', '');
+      const webhookUrl = `${baseUrl}/webhook/${probePath}`;
+      
+      console.log(`[N8nClient] Triggering probe at ${webhookUrl}...`);
+      const response = await fetch(webhookUrl);
+      
+      if (!response.ok) {
+          const errorText = await response.text();
+          if (process.env.DEBUG) {
+             console.warn(`[N8nClient] Probe webhook failed (Status ${response.status}): ${errorText}`);
+          }
+          throw new Error(`Probe webhook failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      // The result should be the array of node types directly (from the internal API response)
+      // or wrapped in the n8n item structure. 
+      // Internal API `rest/node-types` usually returns an array of objects.
+      
+      // If it's the n8n execution wrapper (since we used lastNode responseMode?):
+      // Actually 'lastNode' mode usually returns the JSON data of the last node.
+      
+      // Check if it's the direct array
+      if (Array.isArray(result)) {
+           return result.map((n: any) => n.name);
+      } 
+      
+      // Check if it's wrapped in `data`
+      if (result.data && Array.isArray(result.data)) {
+           return result.data.map((n: any) => n.name);
+      }
+
+      return [];
+      
+    } catch (error) {
+      if (process.env.DEBUG) {
+        console.warn(`[N8nClient] Probe failed: ${(error as Error).message}`);
+      }
+      return [];
+    } finally {
+        if (workflowId) {
+            try { await this.deleteWorkflow(workflowId); } catch(e) {}
+        }
+    }
+  }
+
+  /**
    * Get all workflows
    */
   async getWorkflows(): Promise<{id: string, name: string, active: boolean, updatedAt: string}[]> {

@@ -4,6 +4,7 @@ import { theme } from '../utils/theme.js'
 import {N8nClient} from '../utils/n8nClient.js'
 import {ConfigManager} from '../utils/config.js'
 import { AIService } from '../services/ai.service.js';
+import { runAgenticWorkflow, graph, resumeAgenticWorkflow } from '../agentic/graph.js';
 import * as util from 'util';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -59,6 +60,20 @@ export default class Test extends Command {
     }
 
     const client = new N8nClient({ apiUrl: n8nUrl, apiKey: n8nKey });
+    
+    // 1a. Fetch Valid Node Types (New)
+    let validNodeTypes: string[] = [];
+    try {
+        validNodeTypes = await client.getNodeTypes();
+        if (validNodeTypes.length > 0) {
+            this.log(theme.success(`✔ Loaded ${validNodeTypes.length} valid node types.`));
+        } else {
+            this.log(theme.warn('⚠ Could not load node types. Validation/Shimming will be limited.'));
+        }
+    } catch (e) {
+         this.log(theme.warn(`⚠ Failed to fetch node types: ${(e as Error).message}`));
+    }
+
     let createdWorkflowId: string | null = null;
     const deployedDefinitions = new Map<string, any>(); // TempId -> Original JSON (for patching)
     let globalSuccess = false;
@@ -104,7 +119,6 @@ export default class Test extends Command {
           }
 
           if (localPath) {
-              this.log(theme.agent(`Found local dependency for ${theme.value(id)} at ${theme.value(localPath)}`));
               const content = await fs.readFile(localPath, 'utf-8');
               wf = JSON.parse(content);
           } else {
@@ -115,7 +129,6 @@ export default class Test extends Command {
                   const match = files.find(f => f.toLowerCase() === `${sanitized}.json` || f.toLowerCase() === `${id.toLowerCase()}.json`);
                   if (match) {
                      localPath = path.join(workflowsDir, match);
-                     this.log(theme.agent(`Found local match for ${theme.value(id)}: ${theme.value(localPath)}`));
                      const content = await fs.readFile(localPath, 'utf-8');
                      wf = JSON.parse(content);
                   } else if (id.toUpperCase().includes('SUBWORKFLOW') || id.toUpperCase().includes('ID')) {
@@ -125,7 +138,6 @@ export default class Test extends Command {
                       const jsonFiles = dirFiles.filter(f => f.endsWith('.json') && !f.includes(path.basename(args.workflow || '')));
                       if (jsonFiles.length === 1) {
                           localPath = path.join(dir, jsonFiles[0]);
-                          this.log(theme.agent(`Fuzzy matched placeholder ${theme.value(id)} to ${theme.value(localPath)}`));
                           const content = await fs.readFile(localPath, 'utf-8');
                           wf = JSON.parse(content);
                       }
@@ -168,13 +180,11 @@ export default class Test extends Command {
       };
 
       if (args.workflow) {
-          this.log(theme.agent(`Initializing virtual orchestrator for ${theme.value(args.workflow)}`));
           if (!args.workflow.endsWith('.json')) this.error('Local JSON path required.');
           const content = await fs.readFile(args.workflow, 'utf-8');
           workflowData = JSON.parse(content);
           workflowName = workflowData.name || 'Untitled';
           
-          this.log(theme.agent(`Tracing dependencies for local file...`));
           const nodes = workflowData.nodes || [];
           for (const node of nodes) {
               if (node.type === 'n8n-nodes-base.executeWorkflow') {
@@ -234,7 +244,6 @@ export default class Test extends Command {
               workflowData = JSON.parse(content);
               workflowName = workflowData.name || 'Untitled';
               
-              this.log(theme.agent(`Tracing dependencies for local file...`));
               const nodes = workflowData.nodes || [];
               for (const node of nodes) {
                   if (node.type === 'n8n-nodes-base.executeWorkflow') {
@@ -245,7 +254,6 @@ export default class Test extends Command {
                   }
               }
           } else {
-              this.log(theme.agent(`Tracing dependencies for ${theme.value(selection.id)}...`));
               await fetchDependencies(selection.id, 'ROOT');
               
               const rootRealId = resolutionMap.get(selection.id) || selection.id;
@@ -259,271 +267,201 @@ export default class Test extends Command {
           }
       }
 
-      // --- GLOBAL REPAIR LOOP (Structural + Logical) ---
-      let globalAttempts = 0;
-      const maxGlobalAttempts = 10;
-      let globalRepairHistory: string[] = [];
-      const errorCounts = new Map<string, number>();
-
-      while (globalAttempts < maxGlobalAttempts && !globalSuccess) {
-          globalAttempts++;
-          
-          if (globalAttempts > 1) {
-              this.log(theme.agent(`${theme.warn('Global Repair Loop')} Attempt ${globalAttempts}/${maxGlobalAttempts}...`));
-          }
-
-          try {
-              // 1b. Stage dependencies
-              const idMap = new Map<string, string>(); 
-              (this as any).createdWorkflowIds = (this as any).createdWorkflowIds || []; 
-
-              for (const [realId, info] of dependencyMap.entries()) {
-                   this.log(theme.agent(`Staging dependency: ${info.name} (ID: ${realId})...`));
-                   let depData = {
-                       nodes: info.data.nodes,
-                       connections: info.data.connections,
-                       settings: info.data.settings || {},
-                       staticData: info.data.staticData || {}
-                   };
-                   const hasActivatableTrigger = depData.nodes.some((n: any) => n.type === 'n8n-nodes-base.webhook' && !n.disabled);
-                   if (!hasActivatableTrigger) {
-                       this.log(theme.warn(`Dependency ${info.name} missing activatable trigger. Injecting webhook shim...`));
-                       depData = client.injectManualTrigger(depData);
-                   }
-                   
-                   try {
-                       const { id: tempId } = await client.createWorkflow(`[n8m:dep] ${info.name}`, depData);
-                       (this as any).createdWorkflowIds.push(tempId);
-                       await client.executeWorkflow(tempId);
-                       deployedDefinitions.set(tempId, { name: info.name, data: depData, type: 'dependency', realId: realId });
-                       idMap.set(realId, tempId);
-                   } catch (err) {
-                       const errorMsg = this.cleanErrorMsg((err as Error).message);
-                       this.log(theme.error(`Staging Failed for ${info.name}: ${errorMsg}`));
-                       
-                       this.log(theme.agent(`Initiating auto-repair for structural failure...`));
-                       const ai = AIService.getInstance();
-                       const fixedWf = await ai.generateWorkflowFix(depData, `Staging Error: ${errorMsg}\nHistory: ${globalRepairHistory.join('\n')}`);
-                       dependencyMap.set(realId, { name: info.name, data: fixedWf });
-                       
-                       globalRepairHistory.push(`[Staging] ${info.name} failed: ${errorMsg}`);
-                       throw new Error("RETRY_STAGING");
-                   }
-              }
+      // --- 3. Deploy Dependencies Ephemerally ---
+      const remappedIds = new Map<string, string>();
       
-              const patchWorkflow = (wf: any, map: Map<string, string>) => {
-                  let str = JSON.stringify(wf);
-                  for (const [oldId, newId] of map.entries()) {
-                      str = str.split(oldId).join(newId);
-                  }
-                  return JSON.parse(str);
-              };
+      if (dependencyMap.size > 0) {
+          this.log(theme.subHeader('DEPENDENCY LINKING'));
+          this.log(theme.info(`Found ${dependencyMap.size} dependencies. Deploying ephemeral copies...`));
 
-              let currentWorkflowData = patchWorkflow(workflowData, idMap);
-
-              // 2. COMMON: Stage Ephemeral Root and Test
-              const rootPayload = {
-                  nodes: currentWorkflowData.nodes,
-                  connections: currentWorkflowData.connections,
-                  settings: currentWorkflowData.settings || {},
-                  staticData: currentWorkflowData.staticData || {}
-              };
-
-              const hasRootManualTrigger = rootPayload.nodes.some((n: any) => 
-                (n.type === 'n8n-nodes-base.manualTrigger' || n.type === 'n8n-nodes-base.webhook') && !n.disabled
-              );
-              
-              if (!hasRootManualTrigger) {
-                   this.log(theme.warn(`Root workflow missing manual/webhook trigger. Injecting shim...`));
-                   const shimmed = client.injectManualTrigger(rootPayload);
-                   rootPayload.nodes = shimmed.nodes;
-                   rootPayload.connections = shimmed.connections;
-              }
-
-              this.log(theme.agent(`Deploying ephemeral root: [n8m:test] ${workflowName}...`));
-              
-              let currentRootId: string;
+          for (const [originalId, info] of dependencyMap.entries()) {
               try {
-                  const { id } = await client.createWorkflow(`[n8m:test] ${workflowName}`, rootPayload);
-                  currentRootId = id;
-                  (this as any).createdWorkflowIds.push(currentRootId);
-                  createdWorkflowId = currentRootId;
-              } catch (err) {
-                  const errorMsg = (err as Error).message;
-                  this.log(theme.error(`Staging Failed for Root: ${errorMsg}`));
+                  const depName = `[n8m:test:dep] ${info.name}`;
                   
-                  this.log(theme.agent(`Initiating auto-repair for structural failure...`));
-                  const ai = AIService.getInstance();
-                  const normMsg = this.normalizeError(errorMsg);
-                  const count = (errorCounts.get(normMsg) || 0) + 1;
-                  errorCounts.set(normMsg, count);
-                  const useSearch = count > 1;
-
-                  if (useSearch) {
-                    this.log(theme.agent(`${theme.warn('Grounding Active')}: Searching the web for n8n node metadata...`));
-                  }
-
-                  workflowData = await ai.generateWorkflowFix(rootPayload, `Staging Error: ${errorMsg}\nHistory: ${globalRepairHistory.join('\n')}`, 'gemini-3-flash-preview', useSearch);
-                  
-                  globalRepairHistory.push(`[Staging] Root failed: ${errorMsg}`);
-                  throw new Error("RETRY_STAGING");
-              }
-
-              deployedDefinitions.set(currentRootId, { name: workflowName, data: rootPayload, type: 'root', realId: rootRealTargetId });
-
-              this.log(theme.success('Environment Ready. Validating...'));
-              try {
-                  await client.executeWorkflow(currentRootId);
-              } catch (execErr) {
-                  const errorMsg = this.cleanErrorMsg((execErr as Error).message);
-                  this.log(theme.error(`Validation Activation Failed: ${errorMsg}`));
-                  
-                  this.log(theme.agent(`Initiating auto-repair for activation failure...`));
-                  const ai = AIService.getInstance();
-                  const normMsg = this.normalizeError(errorMsg);
-                  const count = (errorCounts.get(normMsg) || 0) + 1;
-                  errorCounts.set(normMsg, count);
-                  const useSearch = count > 1;
-
-                  if (useSearch) {
-                    this.log(theme.agent(`${theme.warn('Grounding Active')}: Searching the web for n8n node metadata...`));
-                  }
-
-                  workflowData = await ai.generateWorkflowFix(rootPayload, `Activation/Execution Error: ${errorMsg}\nHistory: ${globalRepairHistory.join('\n')}`, 'gemini-3-flash-preview', useSearch);
-                  
-                  globalRepairHistory.push(`[Activation] Failed: ${errorMsg}`);
-                  throw new Error("RETRY_STAGING");
-              }
-
-              // 3. Trigger Execution (E2E)
-              const webhookNode = rootPayload.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
-              if (webhookNode) {
-                  const path = webhookNode.parameters?.path;
-                  
-                  if (path) {
-                      const ai = AIService.getInstance();
-                      
-                      const nodeNames = rootPayload.nodes.map((n: any) => n.name).join(', ');
-                      const context = `Workflow Name: "${workflowName}"
-                      Nodes: ${nodeNames}
-                      Generate a SINGLE JSON object payload that effectively tests this workflow.`;
-
-                      this.log(theme.agent('Generating Mock Data...'));
-                      let mockPayload = await ai.generateMockData(context, 'gemini-3-flash-preview', globalRepairHistory);
-                      
-                      this.log(theme.agent('Triggering Entry Point...'));
-                      const baseUrl = new URL(n8nUrl).origin;
-                      const webhookUrl = `${baseUrl}/webhook/${path}`;
-                      
-                      const response = await fetch(webhookUrl, {
-                          method: 'POST', 
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify(mockPayload)
-                      });
-                      
-                      if (response.ok) {
-                          const executionStartTime = Date.now();
-                          this.log(theme.done('Workflow Triggered Successfully.'));
-                          this.log(theme.subHeader('Live Execution Trace'));
-                          
-                          let executionFound = false;
-                          const reportedNodes = new Set<string>();
-                          
-                          const maxPoll = 50; 
-                          for (let i = 0; i < maxPoll; i++) {
-                              await new Promise(r => setTimeout(r, 2000));
-                              const executions = await client.getWorkflowExecutions(currentRootId);
-                              const recentExec = executions.find((e: any) => new Date(e.startedAt).getTime() > (executionStartTime - 5000));
-                              
-                              if (recentExec) {
-                                  executionFound = true;
-                                  const fullExec = await client.getExecution(recentExec.id) as any;
-                                  const runData = fullExec.data?.resultData?.runData || {};
-                                  let currentError: string | null = null;
-                                  
-                                  Object.entries(runData).forEach(([nodeName, runs]: [string, any]) => {
-                                      for (const [runIndex, run] of runs.entries()) {
-                                          const uniqueKey = `${nodeName}-${runIndex}`;
-                                          if (!reportedNodes.has(uniqueKey)) {
-                                              reportedNodes.add(uniqueKey);
-                                              if (nodeName.includes('Shim_Flattener')) continue;
-                                              
-                                              const outputData = run.data?.main?.[0]?.[0]?.json;
-                                              let displayName = nodeName === 'N8M_Shim_Webhook' ? theme.label('[Trigger]') : theme.label(nodeName);
-                                              const paddedName = displayName.padEnd(25, ' ');
-                                              if (outputData) {
-                                                   const keys = Object.keys(outputData).join(', ');
-                                                   this.log(`${theme.agent('•')} ${paddedName} ${theme.success('✔')} (1 item) ${theme.muted(keys.substring(0, 60))}${keys.length > 60 ? '...' : ''}`);
-                                              } else {
-                                                   currentError = `Flow stopped at ${displayName} (0 items)`;
-                                                   this.log(`${theme.agent('•')} ${paddedName} ${theme.warn('🛑 Flow stopped (0 items)')}`);
-                                              }
-                                          }
-                                      }
-                                  });
-
-                                  if (fullExec.status === 'success' || fullExec.status === 'failed' || currentError) {
-                                      if (fullExec.status === 'success' && !currentError) {
-                                          this.log(theme.success(`Execution Finished Successfully. (ID: ${recentExec.id})`));
-                                          globalSuccess = true;
-                                      } else {
-                                          const errorMsg = currentError || (fullExec.data?.resultData?.error?.message || "Unknown flow failure");
-                                          this.log(theme.error(`Execution Failed/Stopped: ${errorMsg}`));
-                                          
-                                          this.log(theme.agent(`Initiating auto-repair for logical failure...`));
-                                          const normMsg = this.normalizeError(errorMsg);
-                                          const count = (errorCounts.get(normMsg) || 0) + 1;
-                                          errorCounts.set(normMsg, count);
-                                          const useSearch = count > 1;
-
-                                          if (useSearch) {
-                                            this.log(theme.agent(`${theme.warn('Grounding Active')}: Searching the web for n8n node metadata...`));
-                                          }
-
-                                          workflowData = await ai.generateWorkflowFix(workflowData, `Execution Failed/Stopped: ${errorMsg}\nPayload was: ${JSON.stringify(mockPayload)}\nHistory: ${globalRepairHistory.join('\n')}`, 'gemini-3-flash-preview', useSearch);
-                                          globalRepairHistory.push(`[Execution] Failed: ${errorMsg}`);
-                                          throw new Error("RETRY_STAGING");
-                                      }
-                                      break;
-                                  }
-                              }
-                          }
-                          
-                          if (!executionFound) {
-                              this.log(theme.warn('No execution found after webhook trigger.'));
-                              globalRepairHistory.push("[Execution] No execution triggered.");
-                              throw new Error("RETRY_STAGING");
-                          }
+                  // Strict sanitize for n8n API which is picky about extra fields
+                  // Strict sanitize for n8n API which is picky about extra fields
+                  // 'meta' often contains templateId/instanceId which are rejected on create
+                  // 'staticData', 'pinData', and 'tags' can also trigger "additional properties" on strict/older APIs
+                  const allowedKeys = ['name', 'nodes', 'connections', 'settings']; 
+                  const depData: any = {};
+                  for (const key of allowedKeys) {
+                      if (info.data[key] !== undefined) {
+                          depData[key] = info.data[key];
                       }
                   }
-              } else {
-                  this.log(theme.done('Workflow Validated Successfully (No webhook trigger needed).'));
-                  globalSuccess = true;
-              }
-
-          } catch (err) {
-              if ((err as Error).message === "RETRY_STAGING") {
-                  if ((this as any).createdWorkflowIds) {
-                      for (const id of (this as any).createdWorkflowIds) {
-                          try { await client.deleteWorkflow(id); } catch (e) {}
+                  
+                  // Ensure settings is clean
+                  if (depData.settings) {
+                      // Strictly allow only safe settings
+                      const safeSettings = ['saveManualExecutions', 'callerPolicy', 'errorWorkflow', 'timezone', 'saveExecutionProgress', 'executionOrder'];
+                      const cleanSettings: any = {};
+                      for (const k of safeSettings) {
+                           if (depData.settings[k] !== undefined) cleanSettings[k] = depData.settings[k];
                       }
-                      (this as any).createdWorkflowIds = [];
+                      depData.settings = cleanSettings;
                   }
-                  continue;
+                  
+                  // CRITICAL: Sub-workflows often don't have triggers, preventing activation. 
+                  // But n8n requires referenced workflows to be "published" (active) in some contexts,
+                  // or at least we want them active to be safe.
+                  // So we INJECT a dummy trigger if one is missing, to satisfy the activation requirement.
+                  const hasTrigger = (depData.nodes || []).some((n: any) => 
+                      n.type.includes('Trigger') && !n.type.includes('executeWorkflowTrigger')
+                  );
+
+                  if (!hasTrigger) {
+                      // Use the client's helper to inject a shim trigger
+                      // We need to cast client to any or ensure the method is public (it is)
+                      const shimmed = client.injectManualTrigger(depData);
+                      depData.nodes = shimmed.nodes;
+                      depData.connections = shimmed.connections;
+                  }
+                  
+                  depData.name = depName;
+
+                  let result;
+                  try {
+                      result = await client.createWorkflow(depName, depData);
+                  } catch (createErr: any) {
+                      if (createErr.message.includes('additional properties')) {
+                           this.log(theme.warn(`  ⚠ Strict validation error. Retrying with minimal payload...`));
+                           // Fallback: Drop settings entirely if it fails
+                           delete depData.settings;
+                           result = await client.createWorkflow(depName, depData);
+                      } else {
+                          throw createErr;
+                      }
+                  }
+
+                  // this.log(theme.success(`✔ Linked dependency: ${theme.value(info.name)} -> ${result.id}`));
+                  
+                  // ACTIVATE the dependency so it can be called
+                  try {
+                      await client.activateWorkflow(result.id);
+                      // this.log(theme.info(`  └─ Active`)); 
+                  } catch (actErr: any) {
+                       this.log(theme.warn(`  ⚠ Could not activate dependency: ${actErr.message}`));
+                  }
+
+                  remappedIds.set(originalId, result.id);
+                  // Track for cleanup
+                  if (!(this as any).createdWorkflowIds) (this as any).createdWorkflowIds = [];
+                  (this as any).createdWorkflowIds.push(result.id);
+                  
+                  // Also handle the "Resolved" ID if it was different
+                  // (e.g. valid-id in node -> resolved-id in file)
+                  // The dependencyMap key *is* the ID from the node (or resolution map), so we should be good.
+                  
+              } catch (e) {
+                  this.log(theme.warn(`⚠ Failed to deploy dependency ${info.name}: ${(e as Error).message}`));
               }
-              throw err;
           }
       }
 
-      if (!globalSuccess) {
-          this.error(`Workflow test failed after ${maxGlobalAttempts} repair attempts.`);
+      // --- 4. Patch Root Workflow with New IDs ---
+      if (remappedIds.size > 0) {
+          let patchCount = 0;
+          const patchNodes = (nodes: any[]) => {
+              for (const node of nodes) {
+                  if (node.type === 'n8n-nodes-base.executeWorkflow') {
+                      const subId = node.parameters?.workflowId;
+                      const realId = resolutionMap.get(subId) || subId;
+                      if (subId && typeof subId === 'string' && remappedIds.has(realId)) {
+                          node.parameters.workflowId = remappedIds.get(realId);
+                          patchCount++;
+                      }
+                  }
+              }
+          };
+          
+          if (workflowData.nodes) {
+              patchNodes(workflowData.nodes);
+          }
       }
+
+      // --- GLOBAL REPAIR LOOP (Structural + Logical) ---
+      // --- AGENTIC WORKFLOW EXECUTION ---
+      this.log(theme.subHeader('AGENTIC VALIDATION'));
+      this.log(theme.agent("Initializing Agentic Workflow to validate/repair this workflow..."));
+
+      const goal = `Validate and fix the workflow named "${workflowName}"`;
+      
+      const initialState = {
+          userGoal: goal,
+          messages: [],
+          validationErrors: [],
+          workflowJson: workflowData,
+          availableNodeTypes: validNodeTypes
+      };
+
+      // We need to route the graph logger to our CLI logger if possible, or just let it print to stdout
+      // The graph uses console.log currently, which is fine.
+      
+      // Run the graph
+      // Note: We need to cast to any because TeamState might have stricter typing than what we pass
+      const ephemeralThreadId = `test-${Date.now()}`;
+      let result = await runAgenticWorkflow(goal, initialState, ephemeralThreadId) as any;
+      
+      // HITL Handling for Test Command
+      // Check if paused
+      let snapshot = await graph.getState({ configurable: { thread_id: ephemeralThreadId } });
+      if (snapshot.next && snapshot.next.length > 0) {
+          this.log(theme.agent(`Workflow paused at ${snapshot.next.join(', ')} (HITL Interruption)`));
+          
+          if (flags.headless) {
+              this.log(theme.info("Headless mode active. Auto-resuming..."));
+              result = await resumeAgenticWorkflow(ephemeralThreadId);
+          } else {
+             const { resume } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'resume',
+                message: 'Reviewer passed blueprint. Proceed to QA Execution?',
+                default: true
+             }]);
+             if (resume) {
+                 result = await resumeAgenticWorkflow(ephemeralThreadId);
+             } else {
+                 this.log(theme.warn("Test aborted by user."));
+                 return;
+             }
+          }
+      }
+      
+      if (result.validationStatus === 'passed') {
+          globalSuccess = true;
+          // this.log(theme.success("Agentic Validation Passed!"));
+          
+          if (result.workflowJson) {
+              // Extract the fixed/validated workflows
+              // The graph result uses the same structure as Engineer: { workflows: [...] } or just workflowJson object
+              let fixedWorkflow = result.workflowJson;
+              
+              // If it's wrapped in a workflows array (Multi-workflow support), take the first one for now
+              if (result.workflowJson.workflows && Array.isArray(result.workflowJson.workflows)) {
+                   fixedWorkflow = result.workflowJson.workflows[0];
+              }
+              
+              const finalName = fixedWorkflow.name || workflowName;
+              deployedDefinitions.set('agentic-result', { 
+                  name: finalName, 
+                  data: fixedWorkflow, 
+                  type: 'root', 
+                  realId: rootRealTargetId 
+              });
+          }
+      } else {
+          this.log(theme.fail("Agentic Validation Failed."));
+          if (result.validationErrors && result.validationErrors.length > 0) {
+              result.validationErrors.forEach((err: string) => this.log(theme.error(`Error: ${err}`)));
+          }
+      }
+
 
     } catch (error) {
       const errMsg = this.cleanErrorMsg((error as Error).message);
 
       this.log(theme.fail(`Validation Failed`));
-      this.log(theme.brand() + ' ' + theme.error(errMsg));
+      this.log(theme.error(errMsg));
       process.exitCode = 1;
       
       if (flags['keep-on-fail'] && createdWorkflowId) {
@@ -563,6 +501,7 @@ export default class Test extends Command {
         }
         this.log(theme.done('Environment clean.'));
       }
+      process.exit(0);
     }
   }
 
@@ -601,7 +540,11 @@ export default class Test extends Command {
   }
 
   private sanitizeWorkflow(data: any): any {
-      const allowedKeys = ['name', 'nodes', 'connections', 'settings', 'staticData', 'pinData', 'meta'];
+      // n8n API is extremely picky during UPDATE/CREATE.
+      // properties like 'meta', 'pinData', 'tags', and 'versionId' often cause 400 Bad Request
+      // 'request/body must NOT have additional properties'.
+      // We only send the core structure.
+      const allowedKeys = ['name', 'nodes', 'connections', 'settings'];
       const sanitized: any = {};
       for (const key of allowedKeys) {
           if (data[key] !== undefined) {

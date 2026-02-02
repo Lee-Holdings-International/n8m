@@ -18,6 +18,9 @@
   ],
   "dependencies": {
     "@google/genai": "^1.38.0",
+    "@langchain/core": "^1.1.18",
+    "@langchain/langgraph": "^1.1.2",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.0",
     "@oclif/core": "^4",
     "@oclif/plugin-help": "^6",
     "@oclif/plugin-plugins": "^5",
