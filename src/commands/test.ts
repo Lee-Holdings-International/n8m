@@ -543,9 +543,11 @@ export default class Test extends Command {
       // 'request/body must NOT have additional properties'.
       // We only send the core structure.
       const allowedKeys = ['name', 'nodes', 'connections', 'settings'];
-      const sanitized: any = {};
+      const sanitized: any = {
+          settings: data.settings || {}
+      };
       for (const key of allowedKeys) {
-          if (data[key] !== undefined) {
+          if (data[key] !== undefined && key !== 'settings') {
               sanitized[key] = data[key];
           }
       }

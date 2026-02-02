@@ -123,7 +123,9 @@ function fixHallucinatedNodes(workflow: any): any {
       "cheerioHtml": "n8n-nodes-base.htmlExtract",
       "n8n-nodes-base.schedule": "n8n-nodes-base.scheduleTrigger",
       "schedule": "n8n-nodes-base.scheduleTrigger",
-      "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger"
+      "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
+      "n8n-nodes-base.googleCustomSearch": "n8n-nodes-base.googleGemini",
+      "googleCustomSearch": "n8n-nodes-base.googleGemini"
   };
 
   workflow.nodes = workflow.nodes.map((node: any) => {
@@ -161,19 +163,21 @@ function fixN8nConnections(workflow: any): any {
           if (!Array.isArray(mainArr)) mainArr = [[ { node: String(mainArr), type: 'main', index: 0 } ]];
           
           const fixedMain = mainArr.map((segment: any) => {
+              if (!segment) return [];
               if (!Array.isArray(segment)) {
                   // Wrap in array if it's a single object
                   return [segment];
               }
               return segment.map((conn: any) => {
+                  if (!conn) return { node: 'Unknown', type: 'main', index: 0 };
                   if (typeof conn === 'string') return { node: conn, type: 'main', index: 0 };
                   return {
                       node: String(conn.node || 'Unknown'),
                       type: conn.type || 'main',
                       index: conn.index || 0
-                  };
-              });
-          });
+                    };
+                });
+            });
           
           fixedConnections[sourceNode] = { main: fixedMain };
       } else {

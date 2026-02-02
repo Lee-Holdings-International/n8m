@@ -322,7 +322,9 @@ export class AIService {
            "cheerioHtml": "n8n-nodes-base.htmlExtract",
            "n8n-nodes-base.schedule": "n8n-nodes-base.scheduleTrigger",
            "schedule": "n8n-nodes-base.scheduleTrigger",
-           "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger"
+           "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
+           "n8n-nodes-base.googleCustomSearch": "n8n-nodes-base.googleGemini", // Fallback to Gemini if Custom Search is missing
+           "googleCustomSearch": "n8n-nodes-base.googleGemini"
        };
 
        workflow.nodes = workflow.nodes.map((node: any) => {
@@ -363,19 +365,21 @@ export class AIService {
                if (!Array.isArray(mainArr)) mainArr = [[ { node: String(mainArr), type: 'main', index: 0 } ]];
                
                const fixedMain = mainArr.map((segment: any) => {
-                   if (!Array.isArray(segment)) {
-                       // Wrap in array if it's a single object
-                       return [segment];
-                   }
-                   return segment.map((conn: any) => {
-                       if (typeof conn === 'string') return { node: conn, type: 'main', index: 0 };
-                       return {
-                           node: String(conn.node || 'Unknown'),
-                           type: conn.type || 'main',
-                           index: conn.index || 0
-                       };
-                   });
-               });
+                if (!segment) return [];
+                if (!Array.isArray(segment)) {
+                    // Wrap in array if it's a single object
+                    return [segment];
+                }
+                return segment.map((conn: any) => {
+                    if (!conn) return { node: 'Unknown', type: 'main', index: 0 };
+                    if (typeof conn === 'string') return { node: conn, type: 'main', index: 0 };
+                    return {
+                        node: String(conn.node || 'Unknown'),
+                        type: conn.type || 'main',
+                        index: conn.index || 0
+                    };
+                });
+            });
                
                fixedConnections[sourceNode] = { main: fixedMain };
            } else {
@@ -463,16 +467,21 @@ export class AIService {
   /**
    * Validate against real node types and shim unknown ones
    */
-  public validateAndShim(workflow: any, validNodeTypes: string[], explicitlyInvalid: string[] = []): any {
-    if ((!validNodeTypes || validNodeTypes.length === 0) && explicitlyInvalid.length === 0) return workflow;
+  public validateAndShim(workflow: any, validNodeTypes: string[] = [], explicitlyInvalid: string[] = []): any {
+    const valid = validNodeTypes || [];
+    const invalid = explicitlyInvalid || [];
 
-    const validSet = new Set(validNodeTypes.map(t => t.toLowerCase()));
-    const invalidSet = new Set(explicitlyInvalid.map(t => t.toLowerCase()));
+    if (valid.length === 0 && invalid.length === 0) return workflow;
+    if (!workflow || !workflow.nodes || !Array.isArray(workflow.nodes)) return workflow;
+
+    const validSet = new Set(valid.map(t => t.toLowerCase()));
+    const invalidSet = new Set(invalid.map(t => t.toLowerCase()));
 
     // Simple heuristic to identify trigger nodes and n8n nodes
     const isTrigger = (name: string) => name.toLowerCase().includes('trigger') || name.toLowerCase().includes('webhook');
     
     workflow.nodes = workflow.nodes.map((node: any) => {
+        if (!node || !node.type) return node;
         const type = node.type.toLowerCase();
         
         // Shim if:

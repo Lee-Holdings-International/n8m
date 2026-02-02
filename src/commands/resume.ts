@@ -38,6 +38,7 @@ export default class Resume extends Command {
         } else {
             this.log(theme.warn(`Workflow finished with status: ${result.validationStatus}`));
         }
+        process.exit(0);
     } catch (error) {
         this.error(`Failed to resume: ${(error as Error).message}`);
     }

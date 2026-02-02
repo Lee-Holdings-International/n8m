@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import inquirer from 'inquirer';
 import { randomUUID } from 'node:crypto';
 import { graph, resumeAgenticWorkflow } from '../agentic/graph.js';
+import { promptMultiline } from '../ui/helpers/MultilinePrompt.js';
 
 export default class Create extends Command {
   static args = {
@@ -71,33 +72,12 @@ export default class Create extends Command {
 
     // Prompt if still empty
     if (!description) {
-        const { inputType } = await inquirer.prompt([{
-            type: 'list',
-            name: 'inputType',
-            message: 'How would you like to provide the workflow description?',
-            choices: [
-                { name: 'Simple text prompt', value: 'simple' },
-                { name: 'Multiline editor (e.g. for long complex goals)', value: 'editor' }
-            ]
-        }]);
+        description = await promptMultiline();
+    }
 
-        if (inputType === 'editor') {
-            const response = await inquirer.prompt([{
-                type: 'editor',
-                name: 'description',
-                message: 'Describe the workflow in detail (opens editor):',
-                validate: (d: string) => d.trim().length > 0
-            }]);
-            description = response.description;
-        } else {
-            const response = await inquirer.prompt([{
-                type: 'input',
-                name: 'description',
-                message: 'Describe the workflow you want to build:',
-                validate: (d: string) => d.trim().length > 0
-            }]);
-            description = response.description;
-        }
+    // Strip backticks if passed as a single block in argument or piped input
+    if (description && description.startsWith('```') && description.endsWith('```')) {
+        description = description.slice(3, -3).trim();
     }
 
     if (!description) {
@@ -215,5 +195,6 @@ export default class Create extends Command {
     }
     
     this.log(theme.done('Agentic Workflow Complete.'));
+    process.exit(0);
   }
 }
