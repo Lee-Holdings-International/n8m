@@ -74,8 +74,8 @@ export const qaNode = async (state: typeof TeamState.State) => {
             // Activate for webhook testing
             await client.activateWorkflow(createdWorkflowId);
 
-            const nodeNames = state.workflowJson.nodes.map((n: any) => n.name).join(', ');
-            const context = `Workflow Name: "${state.workflowJson.name}"
+            const nodeNames = targetWorkflow.nodes.map((n: any) => n.name).join(', ');
+            const context = `Workflow Name: "${targetWorkflow.name}"
             Nodes: ${nodeNames}
             Goal: "${state.userGoal}"
             Generate a SINGLE JSON object payload that effectively tests this workflow.`;
