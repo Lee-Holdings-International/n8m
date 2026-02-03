@@ -234,6 +234,10 @@ export default class Modify extends Command {
     // 5. POST-MODIFICATION ACTIONS
     const modifiedWorkflow = lastWorkflowJson.workflows ? lastWorkflowJson.workflows[0] : lastWorkflowJson;
     
+    // Self-Healing: Ensure settings and staticData exist for API compatibility
+    if (!modifiedWorkflow.settings) modifiedWorkflow.settings = { executionOrder: 'v1' };
+    if (!modifiedWorkflow.staticData) modifiedWorkflow.staticData = null;
+    
     // Preserve ID if it existed in the original and is missing in the new
     if (workflowData.id) {
         modifiedWorkflow.id = workflowData.id;
@@ -275,7 +279,10 @@ export default class Modify extends Command {
             this.log(theme.success(`✔ Remote workflow updated.`));
         } else {
             this.log(theme.info(`Creating new workflow on instance...`));
-            const result = await client.createWorkflow(modifiedWorkflow.name, modifiedWorkflow);
+            const payload = { ...modifiedWorkflow };
+            // Remove ID to ensure a fresh creation
+            delete payload.id;
+            const result = await client.createWorkflow(payload.name, payload);
             this.log(theme.success(`✔ Created workflow [ID: ${result.id}]`));
             this.log(`${theme.label('Link')} ${theme.secondary(client.getWorkflowLink(result.id))}`);
         }

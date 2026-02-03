@@ -304,6 +304,11 @@ export default class Test extends Command {
                       depData.settings = cleanSettings;
                   }
                   
+                  // Ensure settings exists
+                  if (!depData.settings) {
+                      depData.settings = {};
+                  }
+                  
                   // CRITICAL: Sub-workflows often don't have triggers, preventing activation. 
                   // But n8n requires referenced workflows to be "published" (active) in some contexts,
                   // or at least we want them active to be safe.
