@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import inquirer from 'inquirer';
 import { randomUUID } from 'node:crypto';
 import { graph, resumeAgenticWorkflow } from '../agentic/graph.js';
-import { promptMultiline } from '../ui/helpers/MultilinePrompt.js';
+import { promptMultiline } from '../utils/multilinePrompt.js';
 
 export default class Create extends Command {
   static args = {

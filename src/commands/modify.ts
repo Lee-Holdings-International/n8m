@@ -8,7 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { randomUUID } from 'node:crypto';
-import { promptMultiline } from '../ui/helpers/MultilinePrompt.js';
+import { promptMultiline } from '../utils/multilinePrompt.js';
 
 export default class Modify extends Command {
   static args = {
