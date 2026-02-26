@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Box, Text, render, useApp } from 'ink';
-// @ts-ignore
+// @ts-expect-error no type declarations
 import TextInput from 'ink-text-input';
-// @ts-ignore
+// @ts-expect-error no type declarations
 import { MultilineInput } from 'ink-multiline-input';
 
 interface SmartPromptProps {
