@@ -165,7 +165,7 @@ export const qaNode = async (state: typeof TeamState.State) => {
           try {
               await client.deleteWorkflow(createdWorkflowId);
               console.log(theme.info(`Purged temporary workflow ${createdWorkflowId}`));
-          } catch(e) {}
+          } catch { /* intentionally empty */ }
       }
   }
 

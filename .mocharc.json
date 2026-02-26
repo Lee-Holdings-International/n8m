@@ -1,0 +1,6 @@
+{
+  "import": "tsx",
+  "spec": "test/**/*.test.ts",
+  "timeout": 10000,
+  "forbid-only": true
+}

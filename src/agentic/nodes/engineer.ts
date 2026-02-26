@@ -32,11 +32,11 @@ export const engineerNode = async (state: typeof TeamState.State) => {
           
           // Use the robust fix logic from AIService
           const fixedWorkflow = await aiService.generateWorkflowFix(
-              state.workflowJson, 
+              state.workflowJson,
               errorContext,
-              "gemini-3-flash-preview", 
-              false, 
-              state.availableNodeTypes || [] // Use available types from state
+              undefined,
+              false,
+              state.availableNodeTypes || []
           );
           
           return {
@@ -86,7 +86,7 @@ export const engineerNode = async (state: typeof TeamState.State) => {
        Output a JSON object with this structure:
        {
           "workflows": [
-              { "name": "Gemini-Suggested Name", "nodes": [...], "connections": {...} }
+              { "name": "Workflow Name", "nodes": [...], "connections": {...} }
           ]
        }
        
@@ -94,7 +94,7 @@ export const engineerNode = async (state: typeof TeamState.State) => {
        `;
 
     // Using AIService just for the LLM call to keep auth logic dry
-    const response = await aiService.generateContent(prompt, { model: "gemini-3-flash-preview" });
+    const response = await aiService.generateContent(prompt);
     let cleanJson = response || "{}";
     cleanJson = cleanJson.replace(/```json\n?|\n?```/g, "").trim();
 
@@ -169,10 +169,7 @@ function fixN8nConnections(workflow: any): any {
   
   const fixedConnections: any = {};
   
-  for (let [sourceNode, targets] of Object.entries(workflow.connections)) {
-      // 1. Ensure keys are strings
-      sourceNode = String(sourceNode);
-      
+  for (const [sourceNode, targets] of Object.entries(workflow.connections)) {
       if (!targets || typeof targets !== 'object') continue;
       const targetObj = targets as any;
 

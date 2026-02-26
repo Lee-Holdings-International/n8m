@@ -171,7 +171,7 @@ export default class Create extends Command {
     const savedResources: { path: string, name: string, original: any }[] = [];
 
     for (const workflow of workflows) {
-        let workflowName = workflow.name || (lastSpec && lastSpec.suggestedName) || 'generated-workflow';
+        const workflowName = workflow.name || (lastSpec && lastSpec.suggestedName) || 'generated-workflow';
         const sanitizedName = workflowName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
         
         let targetFile = flags.output;

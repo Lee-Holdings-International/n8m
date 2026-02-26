@@ -77,8 +77,8 @@ export class N8nService {
    * Execute a workflow
    */
   async executeWorkflow(workflowId: string): Promise<WorkflowExecutionResult> {
-    const response = await this.request(`/workflows/${workflowId}/activate`, {
-       method: 'POST' 
+    await this.request(`/workflows/${workflowId}/activate`, {
+       method: 'POST'
     });
     
     // Note: Actual execution trigger might depend on webhook or getting a test webhook URL

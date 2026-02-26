@@ -104,7 +104,7 @@ export default class Prune extends Command {
                 process.stdout.write(`Deleting ${wf.id}... `);
                 await client.deleteWorkflow(wf.id);
                 console.log(theme.done('Deleted'));
-            } catch (e) {
+            } catch {
                 console.log(theme.fail('Failed'));
             }
         }

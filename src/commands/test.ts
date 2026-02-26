@@ -3,9 +3,7 @@ import {Args, Command, Flags} from '@oclif/core'
 import { theme } from '../utils/theme.js'
 import {N8nClient} from '../utils/n8nClient.js'
 import {ConfigManager} from '../utils/config.js'
-import { AIService } from '../services/ai.service.js';
 import { runAgenticWorkflow, graph, resumeAgenticWorkflow } from '../agentic/graph.js';
-import * as util from 'util';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -149,7 +147,7 @@ export default class Test extends Command {
           if (!wf) {
               try {
                   wf = await client.getWorkflow(realId) as any;
-              } catch (e) {
+              } catch {
                   this.log(theme.warn(`Dependency ${theme.value(id)} referenced in node [${contextNodeName}] could not be found.`));
                   if (workflowChoices.length === 0) {
                       const workflowsList = await client.getWorkflows();
@@ -368,7 +366,6 @@ export default class Test extends Command {
 
       // --- 4. Patch Root Workflow with New IDs ---
       if (remappedIds.size > 0) {
-          let patchCount = 0;
           const patchNodes = (nodes: any[]) => {
               for (const node of nodes) {
                   if (node.type === 'n8n-nodes-base.executeWorkflow') {
@@ -376,7 +373,6 @@ export default class Test extends Command {
                       const realId = resolutionMap.get(subId) || subId;
                       if (subId && typeof subId === 'string' && remappedIds.has(realId)) {
                           node.parameters.workflowId = remappedIds.get(realId);
-                          patchCount++;
                       }
                   }
               }
@@ -412,7 +408,7 @@ export default class Test extends Command {
       
       // HITL Handling for Test Command
       // Check if paused
-      let snapshot = await graph.getState({ configurable: { thread_id: ephemeralThreadId } });
+      const snapshot = await graph.getState({ configurable: { thread_id: ephemeralThreadId } });
       if (snapshot.next && snapshot.next.length > 0) {
           if (flags.headless) {
               this.log(theme.info("Headless mode active. Auto-resuming..."));
@@ -503,7 +499,7 @@ export default class Test extends Command {
         for (const wid of uniqueIds) {
             try {
               if (wid) await client.deleteWorkflow(wid);
-            } catch (cleanupError) {}
+            } catch { /* intentionally empty */ }
         }
         this.log(theme.done('Environment clean.'));
       }
@@ -524,7 +520,7 @@ export default class Test extends Command {
                 return errorObj.message;
             }
         }
-      } catch (e) {}
+      } catch { /* intentionally empty */ }
       return errMsg;
   }
 
@@ -532,7 +528,7 @@ export default class Test extends Command {
    * Normalize error messages to catch "similar" errors (masking IDs/numbers)
    */
   private normalizeError(msg: string): string {
-      let normalized = msg.toLowerCase();
+      const normalized = msg.toLowerCase();
       // Group all unrecognized node type errors
       if (normalized.includes('unrecognized node type')) {
           return 'unrecognized node type';
@@ -586,10 +582,10 @@ export default class Test extends Command {
       }]);
       if (!save) return;
 
-      for (const [id, def] of deployedDefinitions.entries()) {
+      for (const [, def] of deployedDefinitions.entries()) {
           const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
           cleanData.name = def.name;
-          let targetPath = originalPath && def.type === 'root' ? originalPath : path.join(process.cwd(), 'workflows', `${def.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`);
+          const targetPath = originalPath && def.type === 'root' ? originalPath : path.join(process.cwd(), 'workflows', `${def.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`);
 
           const { confirmPath } = await inquirer.prompt([{
               type: 'input',
@@ -624,7 +620,7 @@ export default class Test extends Command {
   }
 
   private async deployWorkflows(deployedDefinitions: Map<string, any>, client: N8nClient) {
-      for (const [tempId, def] of deployedDefinitions.entries()) {
+      for (const [, def] of deployedDefinitions.entries()) {
           const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
           cleanData.name = def.name;
           if (def.realId) {

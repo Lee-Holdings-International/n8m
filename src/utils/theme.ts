@@ -36,7 +36,7 @@ try {
   } else {
     throw new Error('Tokens file not found');
   }
-} catch (error) {
+} catch {
   // Fallback tokens matching the user's file
   tokens = {
     colors: {

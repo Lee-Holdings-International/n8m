@@ -156,8 +156,7 @@ export default class Modify extends Command {
     this.log(theme.info(`\nInitializing Agentic Modification for: "${workflowName}"`));
     
     let lastWorkflowJson: any = workflowData;
-    let lastSpec: any = null;
-    
+
     const goal = `Modify the provided workflow based on these instructions: ${instruction}`;
     
     const initialState = {
@@ -184,7 +183,6 @@ export default class Modify extends Command {
                 this.log(theme.agent(`🏗️  Architect: Analysis complete.`));
                 if (stateUpdate.spec) {
                     this.log(`   Plan: ${theme.value(stateUpdate.spec.suggestedName || 'Modifying structure')}`);
-                    lastSpec = stateUpdate.spec;
                 }
             } else if (nodeName === 'engineer') {
                this.log(theme.agent(`⚙️  Engineer: Applying changes to workflow...`));

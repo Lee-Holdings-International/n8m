@@ -34,12 +34,6 @@ export default class Deploy extends Command {
 
     this.log(theme.header('WORKFLOW DEPLOYMENT'));
 
-    const context = {
-      workflow: args.workflow,
-      instance: flags.instance,
-      activate: flags.activate,
-    }
-
     this.log(theme.subHeader('Context Analysis'));
     this.log(`${theme.label('Workflow')} ${theme.value(args.workflow)}`);
     this.log(`${theme.label('Instance')} ${theme.value(flags.instance)}`);

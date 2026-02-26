@@ -1,4 +1,3 @@
-import chalk from 'chalk'
 
 export interface N8nClientConfig {
   apiUrl?: string
@@ -76,7 +75,7 @@ export class N8nClient {
   /**
    * Execute a workflow and return the result
    */
-  async executeWorkflow(workflowId: string, data?: unknown): Promise<WorkflowExecutionResult> {
+  async executeWorkflow(workflowId: string, _data?: unknown): Promise<WorkflowExecutionResult> {
     try {
       // NOTE: Public API does not always expose a direct 'execute' endpoint for all workflow types.
       // For validation purposes, we 'activate' the workflow which runs internal validation.
@@ -342,7 +341,7 @@ export class N8nClient {
       return [];
     } finally {
         if (workflowId) {
-            try { await this.deleteWorkflow(workflowId); } catch(e) {}
+            try { await this.deleteWorkflow(workflowId); } catch { /* intentionally empty */ }
         }
     }
   }
