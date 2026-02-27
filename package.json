@@ -1,6 +1,6 @@
 {
   "name": "@lhi/n8m",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Agentic n8n CLI wrapper - A Skill Bridge for n8n workflow automation",
   "author": "Lem Canady",
   "license": "MIT",
