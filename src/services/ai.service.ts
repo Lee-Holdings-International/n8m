@@ -416,6 +416,95 @@ export class AIService {
   }
 
   /**
+   * Generate an alternative workflow specification with a different approach to the same goal.
+   * Used by the Architect node to produce a second strategy for parallel Engineer execution.
+   */
+  async generateAlternativeSpec(goal: string, primarySpec: any): Promise<any> {
+    const prompt = `You are an n8n Solutions Architect exploring alternative workflow designs.
+
+A primary solution already exists for this goal. Your task is to design a DIFFERENT approach that achieves the same result.
+
+Goal: ${goal}
+
+Primary Specification (for reference — design something DIFFERENT):
+${JSON.stringify(primarySpec, null, 2)}
+
+Create an alternative approach that:
+- Uses DIFFERENT n8n nodes or integrations where possible
+- May take a simpler, more minimal path OR a more robust, comprehensive one
+- Achieves the SAME end goal
+
+Output ONLY valid JSON with this structure:
+{
+  "goal": "...",
+  "suggestedName": "...",
+  "tasks": [...],
+  "nodes": [...],
+  "assumptions": [...],
+  "questions": [],
+  "strategyType": "alternative"
+}`;
+
+    const response = await this.generateContent(prompt, { temperature: 0.9 });
+    let cleanJson = response || '{}';
+    cleanJson = cleanJson.replace(/```json\n?|\n?```/g, '').trim();
+
+    try {
+      return JSON.parse(cleanJson);
+    } catch {
+      console.warn('[AIService] Failed to parse alternative spec, falling back to primary variant');
+      return { ...primarySpec, suggestedName: `${primarySpec.suggestedName} (Alt)`, strategyType: 'alternative' };
+    }
+  }
+
+  /**
+   * Evaluate multiple workflow candidates and select the best one for the given goal.
+   * Used by the Supervisor node to choose between parallel Engineer outputs.
+   */
+  async evaluateCandidates(goal: string, candidates: any[]): Promise<{ selectedIndex: number; reason: string }> {
+    if (candidates.length <= 1) {
+      return { selectedIndex: 0, reason: 'Single candidate — no evaluation needed.' };
+    }
+
+    const candidateSummaries = candidates.map((c, i) => {
+      const nodeNames = c?.nodes?.map((n: any) => n.name || n.type).join(', ') || 'unknown nodes';
+      return `Candidate ${i + 1}: "${c?.name || 'Unnamed'}" — Nodes: [${nodeNames}]`;
+    }).join('\n');
+
+    const prompt = `You are an n8n Solutions Architect evaluating workflow implementations.
+
+Goal: ${goal}
+
+Evaluate these ${candidates.length} candidate workflows and select the BEST one:
+${candidateSummaries}
+
+Select the best candidate based on:
+1. Completeness — does it fully achieve the goal?
+2. Node quality — are the nodes standard and appropriate?
+3. Simplicity — is it appropriately complex (not over-engineered)?
+4. Data flow — is the logic sound?
+
+Output ONLY valid JSON:
+{ "selectedIndex": <0-based integer>, "reason": "<1-2 sentence explanation>" }`;
+
+    const response = await this.generateContent(prompt, { temperature: 0.3 });
+    let cleanJson = response || '{}';
+    cleanJson = cleanJson.replace(/```json\n?|\n?```/g, '').trim();
+
+    try {
+      const result = JSON.parse(cleanJson);
+      const idx = typeof result.selectedIndex === 'number' ? result.selectedIndex : 0;
+      return {
+        selectedIndex: Math.max(0, Math.min(idx, candidates.length - 1)),
+        reason: result.reason || 'Best overall candidate.',
+      };
+    } catch {
+      console.warn('[AIService] Failed to parse candidate evaluation, defaulting to index 0');
+      return { selectedIndex: 0, reason: 'Evaluation failed, defaulting to first candidate.' };
+    }
+  }
+
+  /**
    * Validate against real node types and shim unknown ones
    */
   public validateAndShim(workflow: any, validNodeTypes: string[] = [], explicitlyInvalid: string[] = []): any {

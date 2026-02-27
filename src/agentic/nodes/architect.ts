@@ -36,24 +36,28 @@ export const architectNode = async (state: typeof TeamState.State) => {
 
   try {
     const spec = await aiService.generateSpec(state.userGoal);
-    
+
     // Check if the spec requires clarification
     const questions = spec.questions;
     const needsClarification = questions && questions.length > 0;
-    
-    // For parallelism, we can create a secondary "Alternative" strategy
-    // In a real scenario, the LLM would generate these explicitly.
-    // Here we simulate it by wrapping the single spec into a strategy list.
+
+    // Multi-agent collaboration: generate an alternative strategy in parallel with the primary.
+    // Both are handed off to separate Engineer agents that run concurrently.
+    const alternativeSpec = await aiService.generateAlternativeSpec(state.userGoal, spec);
+
     const strategies = [
-        { ...spec, name: "Primary Strategy" },
-        // We could ask AI for an alternative here, but for now let's keep it simple to save tokens
-        // { ...spec, name: "Alternative Strategy (Robust)" } 
+      { ...spec,            strategyName: "Primary Strategy"      },
+      { ...alternativeSpec, strategyName: "Alternative Strategy"  },
     ];
 
+    const logEntry = `Architect: Generated 2 strategies — "${strategies[0].suggestedName}" (primary) and "${strategies[1].suggestedName}" (alternative)`;
+    console.log(`[Architect] ${logEntry}`);
+
     return {
-      spec, // Keep backward compatibility for single-path
+      spec,
       strategies,
       needsClarification,
+      collaborationLog: [logEntry],
     };
   } catch (error) {
     console.error("Architect failed:", error);

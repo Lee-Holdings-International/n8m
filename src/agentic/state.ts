@@ -25,4 +25,9 @@ export const TeamState = Annotation.Root({
     reducer: (x, y) => ({ ...x, ...y }),
     default: () => ({}),
   }),
+  // Collaboration Log: agents record their reasoning for visibility
+  collaborationLog: Annotation<string[]>({
+    reducer: (x, y) => x.concat(y),
+    default: () => [],
+  }),
 });

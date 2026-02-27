@@ -488,4 +488,107 @@ describe('AIService', () => {
       expect(warnings.some(w => w.includes('No AI key found'))).to.be.true;
     });
   });
+
+  // -------------------------------------------------------------------------
+  describe('generateAlternativeSpec() with mocked client', () => {
+    it('returns parsed alternative spec from AI response', async () => {
+      const alt = {
+        goal: 'Alt goal', suggestedName: 'Alt WF', tasks: [], nodes: [],
+        assumptions: [], questions: [], strategyType: 'alternative',
+      };
+      injectMockClient(service, JSON.stringify(alt));
+      const primary = { goal: 'Primary goal', suggestedName: 'Primary WF', tasks: [], nodes: [], assumptions: [], questions: [] };
+      const result = await service.generateAlternativeSpec('some goal', primary);
+      expect(result.suggestedName).to.equal('Alt WF');
+      expect(result.strategyType).to.equal('alternative');
+    });
+
+    it('strips markdown code fences before parsing', async () => {
+      const alt = { goal: 'Alt', suggestedName: 'Alt WF', tasks: [], nodes: [], assumptions: [], questions: [], strategyType: 'alternative' };
+      injectMockClient(service, '```json\n' + JSON.stringify(alt) + '\n```');
+      const result = await service.generateAlternativeSpec('goal', {});
+      expect(result.suggestedName).to.equal('Alt WF');
+    });
+
+    it('falls back to a primary-spec variant when AI returns invalid JSON', async () => {
+      injectMockClient(service, 'not valid json at all');
+      const primary = { goal: 'Primary', suggestedName: 'Primary WF', tasks: [], nodes: [], assumptions: [], questions: [] };
+      const result = await service.generateAlternativeSpec('goal', primary);
+      expect(result.suggestedName).to.equal('Primary WF (Alt)');
+      expect(result.strategyType).to.equal('alternative');
+    });
+
+    it('preserves all fields from the AI response', async () => {
+      const alt = {
+        goal: 'Send webhook', suggestedName: 'Webhook Alt', tasks: ['Step 1'],
+        nodes: ['Webhook', 'Set'], assumptions: ['Has key'], questions: [], strategyType: 'alternative',
+      };
+      injectMockClient(service, JSON.stringify(alt));
+      const result = await service.generateAlternativeSpec('Send webhook notification', {});
+      expect(result.tasks).to.deep.equal(['Step 1']);
+      expect(result.nodes).to.deep.equal(['Webhook', 'Set']);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('evaluateCandidates() with mocked client', () => {
+    it('returns index 0 immediately for a single candidate without an AI call', async () => {
+      // No mock injected — if AI is called this test would fail with a real API error
+      const result = await service.evaluateCandidates('goal', [{ name: 'Only', nodes: [] }]);
+      expect(result.selectedIndex).to.equal(0);
+      expect(result.reason).to.include('Single candidate');
+    });
+
+    it('returns index 0 immediately for an empty candidates array', async () => {
+      const result = await service.evaluateCandidates('goal', []);
+      expect(result.selectedIndex).to.equal(0);
+    });
+
+    it('parses LLM output and returns the selected index and reason', async () => {
+      injectMockClient(service, JSON.stringify({ selectedIndex: 1, reason: 'Second is better.' }));
+      const candidates = [
+        { name: 'First', nodes: [] },
+        { name: 'Second', nodes: [{ name: 'HTTP', type: 'n8n-nodes-base.httpRequest' }] },
+      ];
+      const result = await service.evaluateCandidates('goal', candidates);
+      expect(result.selectedIndex).to.equal(1);
+      expect(result.reason).to.equal('Second is better.');
+    });
+
+    it('clamps out-of-range selectedIndex to the last valid index', async () => {
+      injectMockClient(service, JSON.stringify({ selectedIndex: 99, reason: 'Out of range.' }));
+      const candidates = [{ name: 'A', nodes: [] }, { name: 'B', nodes: [] }];
+      const result = await service.evaluateCandidates('goal', candidates);
+      expect(result.selectedIndex).to.equal(1); // clamped to candidates.length - 1
+    });
+
+    it('clamps negative selectedIndex to 0', async () => {
+      injectMockClient(service, JSON.stringify({ selectedIndex: -5, reason: 'Negative.' }));
+      const candidates = [{ name: 'A', nodes: [] }, { name: 'B', nodes: [] }];
+      const result = await service.evaluateCandidates('goal', candidates);
+      expect(result.selectedIndex).to.equal(0);
+    });
+
+    it('falls back to index 0 when AI returns invalid JSON', async () => {
+      injectMockClient(service, 'not json at all');
+      const candidates = [{ name: 'A', nodes: [] }, { name: 'B', nodes: [] }];
+      const result = await service.evaluateCandidates('goal', candidates);
+      expect(result.selectedIndex).to.equal(0);
+    });
+
+    it('strips markdown fences before parsing', async () => {
+      injectMockClient(service, '```json\n' + JSON.stringify({ selectedIndex: 0, reason: 'Good.' }) + '\n```');
+      const candidates = [{ name: 'A', nodes: [] }, { name: 'B', nodes: [] }];
+      const result = await service.evaluateCandidates('goal', candidates);
+      expect(result.selectedIndex).to.equal(0);
+      expect(result.reason).to.equal('Good.');
+    });
+
+    it('uses a default reason when AI omits it', async () => {
+      injectMockClient(service, JSON.stringify({ selectedIndex: 0 }));
+      const candidates = [{ name: 'A', nodes: [] }, { name: 'B', nodes: [] }];
+      const result = await service.evaluateCandidates('goal', candidates);
+      expect(result.reason).to.be.a('string').and.have.length.above(0);
+    });
+  });
 });
