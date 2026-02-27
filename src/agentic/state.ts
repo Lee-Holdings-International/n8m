@@ -30,4 +30,6 @@ export const TeamState = Annotation.Root({
     reducer: (x, y) => x.concat(y),
     default: () => [],
   }),
+  userFeedback: Annotation<string>,
+  testScenarios: Annotation<any[]>,
 });

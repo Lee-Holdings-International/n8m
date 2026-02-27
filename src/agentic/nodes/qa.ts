@@ -79,79 +79,76 @@ export const qaNode = async (state: typeof TeamState.State) => {
     const result = await client.createWorkflow(rootPayload.name, rootPayload);
     createdWorkflowId = result.id;
 
-    // 4. Generate Mock Data
+    // 4. Determine Test Scenarios
+    let scenarios = state.testScenarios;
+    if (!scenarios || scenarios.length === 0) {
+        // Fallback to generating a single mock payload for efficiency if no scenarios provided
+        const nodeNames = targetWorkflow.nodes.map((n: any) => n.name).join(', ');
+        const context = `Workflow Name: "${targetWorkflow.name}"
+        Nodes: ${nodeNames}
+        Goal: "${state.userGoal}"
+        Generate a SINGLE JSON object payload that effectively tests this workflow.`;
+        const mockPayload = await aiService.generateMockData(context);
+        scenarios = [{ name: "Default Test", payload: mockPayload }];
+    }
+
     const webhookNode = rootPayload.nodes.find((n: any) => n.type === 'n8n-nodes-base.webhook');
-    let triggerSuccess = false;
 
     if (webhookNode) {
         const path = webhookNode.parameters?.path;
         if (path) {
             // Activate for webhook testing
             await client.activateWorkflow(createdWorkflowId);
-
-            const nodeNames = targetWorkflow.nodes.map((n: any) => n.name).join(', ');
-            const context = `Workflow Name: "${targetWorkflow.name}"
-            Nodes: ${nodeNames}
-            Goal: "${state.userGoal}"
-            Generate a SINGLE JSON object payload that effectively tests this workflow.`;
-
-            const mockPayload = await aiService.generateMockData(context);
-            
-            
             const baseUrl = new URL(n8nUrl).origin;
             const webhookUrl = `${baseUrl}/webhook/${path}`;
-            
-            const response = await fetch(webhookUrl, {
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(mockPayload)
-            });
-            
-            if (response.ok) {
-                triggerSuccess = true;
-            } else {
-                throw new Error(`Webhook trigger failed with status ${response.status}`);
+
+            for (const scenario of scenarios) {
+                console.log(theme.info(`🧪 Running Scenario: ${theme.value(scenario.name)}...`));
+                const response = await fetch(webhookUrl, {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(scenario.payload)
+                });
+                
+                if (!response.ok) {
+                    validationErrors.push(`Scenario "${scenario.name}" failed to trigger: ${response.status}`);
+                    continue;
+                }
+
+                // 5. Verify Execution for this scenario
+                const executionStartTime = Date.now();
+                let executionFound = false;
+                const maxPoll = 15; 
+                
+                for (let i = 0; i < maxPoll; i++) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const executions = await client.getWorkflowExecutions(createdWorkflowId);
+                    const recentExec = executions.find((e: any) => new Date(e.startedAt).getTime() > (executionStartTime - 5000));
+
+                    if (recentExec) {
+                        executionFound = true;
+                        const fullExec = await client.getExecution(recentExec.id) as any;
+                        
+                        if (fullExec.status === 'success') {
+                            console.log(theme.success(`   ✔ Passed`));
+                        } else {
+                            const errorMsg = fullExec.data?.resultData?.error?.message || "Unknown flow failure";
+                            validationErrors.push(`Scenario "${scenario.name}" Failed: ${errorMsg}`);
+                            console.log(theme.error(`   ✘ Failed: ${errorMsg}`));
+                        }
+                        break;
+                    }
+                }
+                
+                if (!executionFound) {
+                    validationErrors.push(`Scenario "${scenario.name}": No execution detected after trigger.`);
+                    console.log(theme.warn(`   ⚠ No execution detected.`));
+                }
             }
         }
     } else {
         // Just execute if no webhook (manual trigger)
          await client.executeWorkflow(createdWorkflowId);
-         triggerSuccess = true;
-    }
-
-    // 5. Verify Execution
-    // Wait for execution to appear
-    if (triggerSuccess) {
-         const executionStartTime = Date.now();
-         let executionFound = false;
-         const maxPoll = 20; // shorter poll for agent
-         
-         for (let i = 0; i < maxPoll; i++) {
-            await new Promise(r => setTimeout(r, 2000));
-            const executions = await client.getWorkflowExecutions(createdWorkflowId);
-            const recentExec = executions.find((e: any) => new Date(e.startedAt).getTime() > (executionStartTime - 5000));
-
-            if (recentExec) {
-                executionFound = true;
-                const fullExec = await client.getExecution(recentExec.id) as any;
-                
-                if (fullExec.status === 'success') {
-                    return {
-                        validationStatus: 'passed',
-                        validationErrors: [],
-                    };
-                } else {
-                     const errorMsg = fullExec.data?.resultData?.error?.message || "Unknown flow failure";
-                     validationErrors.push(`Execution Failed: ${errorMsg}`);
-                     console.log(theme.error(`Execution Failed: ${errorMsg}`));
-                     break;
-                }
-            }
-         }
-         
-         if (!executionFound) {
-             validationErrors.push("No execution detected after trigger.");
-         }
     }
 
     // 6. Dynamic Tool Execution (Sandbox)
@@ -185,7 +182,7 @@ export const qaNode = async (state: typeof TeamState.State) => {
   }
 
   return {
-    validationStatus: 'failed',
+    validationStatus: validationErrors.length === 0 ? 'passed' : 'failed',
     validationErrors,
   };
 };

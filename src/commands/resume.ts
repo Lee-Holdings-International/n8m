@@ -28,9 +28,49 @@ export default class Resume extends Command {
     }
 
     this.log(theme.info(`Workflow is paused at: ${next.join(', ')}`));
-    this.log(theme.agent("Resuming..."));
 
     try {
+        if (next.includes('engineer')) {
+            const state = snapshot.values;
+            if (state.strategies && state.strategies.length > 0) {
+                this.log(theme.header('\nPAUSED STRATEGIES:'));
+                state.strategies.forEach((s: any, i: number) => {
+                    this.log(`${i === 0 ? theme.success('  [Primary]') : theme.info('  [Alternative]')} ${theme.value(s.suggestedName)}`);
+                    this.log(`  Description: ${s.description}`);
+                    if (s.nodes && s.nodes.length > 0) {
+                        this.log(`  Proposed Nodes: ${s.nodes.map((n: any) => n.type.split('.').pop()).join(', ')}`);
+                    }
+                    this.log('');
+                });
+
+                const { action } = await (await import('inquirer')).default.prompt([{
+                    type: 'list',
+                    name: 'action',
+                    message: 'How would you like to proceed?',
+                    choices: [
+                        { name: 'Approve and Generate Workflow', value: 'approve' },
+                        { name: 'Provide Feedback / Refine Strategy', value: 'feedback' },
+                        { name: 'Exit', value: 'exit' }
+                    ]
+                }]);
+
+                if (action === 'approve') {
+                    this.log(theme.agent("Approve! Resuming..."));
+                    await graph.updateState({ configurable: { thread_id: threadId } }, { userFeedback: undefined }, 'engineer');
+                } else if (action === 'feedback') {
+                    const { feedback } = await (await import('inquirer')).default.prompt([{
+                        type: 'input',
+                        name: 'feedback',
+                        message: 'Enter your feedback/instructions:',
+                    }]);
+                    await graph.updateState({ configurable: { thread_id: threadId } }, { userFeedback: feedback }, 'engineer');
+                } else {
+                    return;
+                }
+            }
+        }
+
+        this.log(theme.agent("Resuming..."));
         const result = await resumeAgenticWorkflow(threadId);
         
         if (result.validationStatus === 'passed') {

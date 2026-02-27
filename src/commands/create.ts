@@ -8,6 +8,7 @@ import inquirer from 'inquirer';
 import { randomUUID } from 'node:crypto';
 import { graph, resumeAgenticWorkflow } from '../agentic/graph.js';
 import { promptMultiline } from '../utils/multilinePrompt.js';
+import { DocService } from '../services/doc.service.js';
 
 export default class Create extends Command {
   static args = {
@@ -17,7 +18,7 @@ export default class Create extends Command {
     }),
   }
 
-  static description = 'Generate n8n workflows from natural language using Gemini AI Agent'
+  static description = 'Generate n8n workflows from natural language using an AI Agent'
 
   static examples = [
     '<%= config.bin %> <%= command.id %> "Send a telegram alert when I receive an email"',
@@ -101,9 +102,17 @@ export default class Create extends Command {
             
             if (nodeName === 'architect') {
                 this.log(theme.agent(`🏗️  Architect: Blueprint designed.`));
-                if (stateUpdate.spec?.suggestedName) {
-                    this.log(`   Goal: ${theme.value(stateUpdate.spec.suggestedName)}`);
-                    lastSpec = stateUpdate.spec;
+                if (stateUpdate.strategies && stateUpdate.strategies.length > 0) {
+                    lastSpec = stateUpdate.strategies[0]; // Default to primary
+                    this.log(theme.header('\nPROPOSED STRATEGIES:'));
+                    stateUpdate.strategies.forEach((s: any, i: number) => {
+                        this.log(`${i === 0 ? theme.success('  [Primary]') : theme.info('  [Alternative]')} ${theme.value(s.suggestedName)}`);
+                        this.log(`  Description: ${s.description}`);
+                        if (s.nodes && s.nodes.length > 0) {
+                            this.log(`  Proposed Nodes: ${s.nodes.map((n: any) => n.type.split('.').pop()).join(', ')}`);
+                        }
+                        this.log('');
+                    });
                 }
             } else if (nodeName === 'engineer') {
                this.log(theme.agent(`⚙️  Engineer: Workflow code generated/updated.`));
@@ -125,36 +134,89 @@ export default class Create extends Command {
         }
 
         // Check for interrupt/pause
-        const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
-        if (snapshot.next.length > 0) {
-            this.log(theme.warn(`\n⏸️  Workflow Paused at step: ${snapshot.next.join(', ')}`));
+        let snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+        while (snapshot.next.length > 0) {
+            const nextNode = snapshot.next[0];
+            this.log(theme.warn(`\n⏸️  Workflow Paused at step: ${nextNode}`));
             
-             const { resume } = await inquirer.prompt([{
-                type: 'confirm',
-                name: 'resume',
-                message: 'Review completed. Resume workflow execution?',
-                default: true
-            }]);
+            if (nextNode === 'engineer') {
+                const { action } = await inquirer.prompt([{
+                    type: 'list',
+                    name: 'action',
+                    message: 'How would you like to proceed with the Blueprint?',
+                    choices: [
+                        { name: 'Approve and Generate Workflow', value: 'approve' },
+                        { name: 'Provide Feedback / Refine Strategy', value: 'feedback' },
+                        { name: 'Exit and Resume Later', value: 'exit' }
+                    ]
+                }]);
 
-            if (resume) {
-                 this.log(theme.agent("Resuming..."));
-                 // Resume recursively/iteratively? 
-                 // For now, simple resume call. ideally we'd stream again.
-                 // But wait, resumeAgenticWorkflow returns the FINAL result, not a stream.
-                 // We should probably loop if we want to stream again, but let's just create a simple resume handling here.
-                 // Or we can just call resumeAgenticWorkflow and print the final result.
-                 
-                 const result = await resumeAgenticWorkflow(threadId);
-                 if (result.validationStatus === 'passed') {
-                     this.log(theme.success(`🧪 QA (Resumed): Validation Passed!`));
-                     if (result.workflowJson) lastWorkflowJson = result.workflowJson;
-                 } else {
-                     this.log(theme.fail(`🧪 QA (Resumed): Final Status: ${result.validationStatus}`));
-                 }
+                if (action === 'approve') {
+                    this.log(theme.agent("Approve! Proceeding to engineering..."));
+                    await graph.updateState({ configurable: { thread_id: threadId } }, { userFeedback: undefined }, nextNode);
+                    const stream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                    for await (const event of stream) {
+                         const nodeName = Object.keys(event)[0];
+                         const stateUpdate = (event as Record<string, any>)[nodeName];
+                         if (nodeName === 'engineer') {
+                            this.log(theme.agent(`⚙️  Engineer: Workflow code generated/updated.`));
+                            if (stateUpdate.workflowJson) lastWorkflowJson = stateUpdate.workflowJson;
+                         } else if (nodeName === 'qa') {
+                            const status = stateUpdate.validationStatus;
+                            if (status === 'passed') this.log(theme.success(`🧪 QA: Validation Passed!`));
+                            else this.log(theme.fail(`🧪 QA: Validation Failed.`));
+                         }
+                    }
+                } else if (action === 'feedback') {
+                    const { feedback } = await inquirer.prompt([{
+                        type: 'input',
+                        name: 'feedback',
+                        message: 'Enter your feedback/instructions:',
+                    }]);
+                    this.log(theme.agent("Updating strategy with your feedback..."));
+                    // In a real implementation, we'd loop back to Architect or update the goal.
+                    // For now, let's update userFeedback and resume. 
+                    // To actually RE-ARCHITECT, we might need to jump back.
+                    // LangGraph can handle this by updating state and using a conditional edge.
+                    await graph.updateState({ configurable: { thread_id: threadId } }, { userFeedback: feedback }, nextNode);
+                    // For now, just resume and let Engineer see the feedback.
+                    const stream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                    for await (const event of stream) {
+                        const nodeName = Object.keys(event)[0];
+                        const stateUpdate = (event as Record<string, any>)[nodeName];
+                        if (nodeName === 'engineer') {
+                           this.log(theme.agent(`⚙️  Engineer: Workflow code generated/updated (Feedback incorporated).`));
+                           if (stateUpdate.workflowJson) lastWorkflowJson = stateUpdate.workflowJson;
+                        } else if (nodeName === 'qa') {
+                            if (stateUpdate.validationStatus === 'passed') this.log(theme.success(`🧪 QA: Validation Passed!`));
+                        }
+                    }
+                } else {
+                    this.log(theme.info(`Session persisted. Resume later with: n8m resume ${threadId}`));
+                    return;
+                }
             } else {
-                this.log(theme.info(`Session persisted. Resume later with: n8m resume ${threadId}`));
-                return;
+                // Handle other interrupts (like QA)
+                const { resume } = await inquirer.prompt([{
+                    type: 'confirm',
+                    name: 'resume',
+                    message: `Review completed for ${nextNode}. Resume workflow execution?`,
+                    default: true
+                }]);
+
+                if (resume) {
+                    this.log(theme.agent("Resuming..."));
+                    const result = await resumeAgenticWorkflow(threadId);
+                    if (result.validationStatus === 'passed') {
+                        this.log(theme.success(`🧪 QA (Resumed): Validation Passed!`));
+                        if (result.workflowJson) lastWorkflowJson = result.workflowJson;
+                    }
+                } else {
+                    this.log(theme.info(`Session persisted. Resume later with: n8m resume ${threadId}`));
+                    return;
+                }
             }
+            snapshot = await graph.getState({ configurable: { thread_id: threadId } });
         }
 
     } catch (error) {
@@ -170,28 +232,30 @@ export default class Create extends Command {
     const workflows = lastWorkflowJson.workflows || [lastWorkflowJson];
     const savedResources: { path: string, name: string, original: any }[] = [];
 
+    const docService = DocService.getInstance();
     for (const workflow of workflows) {
         const workflowName = workflow.name || (lastSpec && lastSpec.suggestedName) || 'generated-workflow';
-        const sanitizedName = workflowName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+        const projectTitle = await docService.generateProjectTitle(workflow);
+        workflow.name = projectTitle; // Standardize name
         
-        let targetFile = flags.output;
-        // If multiple workflows and output provided, append name to avoid overwrite, unless it's a directory
-        if (workflows.length > 1 && targetFile && !targetFile.endsWith('.json')) {
-             targetFile = path.join(targetFile, `${sanitizedName}.json`);
-        } else if (workflows.length > 1 && targetFile) {
-             // If specific file given but we have multiple, suffix it
-             targetFile = targetFile.replace('.json', `-${sanitizedName}.json`);
-        } else if (!targetFile) {
-            const targetDir = path.join(process.cwd(), 'workflows');
-            if (!existsSync(targetDir)) { 
-                await fs.mkdir(targetDir, { recursive: true });
-            }
-            targetFile = path.join(targetDir, `${sanitizedName}.json`);
-        }
+        const slug = docService.generateSlug(projectTitle);
+        const workflowsDir = path.join(process.cwd(), 'workflows');
+        const targetDir = path.join(workflowsDir, slug);
+        const targetFile = path.join(targetDir, 'workflow.json');
 
+        await fs.mkdir(targetDir, { recursive: true });
         await fs.writeFile(targetFile, JSON.stringify(workflow, null, 2));
-        savedResources.push({ path: targetFile, name: workflowName, original: workflow });
-        this.log(theme.success(`\nWorkflow saved to: ${targetFile}`));
+
+        this.log(theme.success(`\nWorkflow organized at: ${targetDir}`));
+        
+        // Auto-Generate Documentation
+        this.log(theme.agent("Generating initial documentation..."));
+        const mermaid = docService.generateMermaid(workflow);
+        const readmeContent = await docService.generateReadme(workflow);
+        const fullDoc = `# ${projectTitle}\n\n## Visual Flow\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n\n${readmeContent}`;
+        await fs.writeFile(path.join(targetDir, 'README.md'), fullDoc);
+
+        savedResources.push({ path: targetFile, name: projectTitle, original: workflow });
     }
     
     this.log(theme.done('Agentic Workflow Complete.'));

@@ -22,7 +22,7 @@ export default class Modify extends Command {
     }),
   }
 
-  static description = 'Modify existing n8n workflows using Gemini AI Agent'
+  static description = 'Modify existing n8n workflows using an AI Agent'
 
   static flags = {
     multiline: Flags.boolean({

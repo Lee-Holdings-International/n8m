@@ -3,6 +3,8 @@ import {Args, Command, Flags} from '@oclif/core'
 import { theme } from '../utils/theme.js'
 import {N8nClient} from '../utils/n8nClient.js'
 import {ConfigManager} from '../utils/config.js'
+import { AIService } from '../services/ai.service.js';
+import { DocService } from '../services/doc.service.js';
 import { runAgenticWorkflow, graph, resumeAgenticWorkflow } from '../agentic/graph.js';
 import * as path from 'path';
 import * as fs from 'fs/promises';
@@ -38,6 +40,10 @@ export default class Test extends Command {
       hidden: true,
       description: 'Execute test but do not prompt for deploy/save actions',
     }),
+    'ai-scenarios': Flags.boolean({
+      default: false,
+      description: 'Generate 3 diverse AI test scenarios (happy path, edge case, error)',
+    }),
   }
 
   async run(): Promise<void> {
@@ -58,6 +64,7 @@ export default class Test extends Command {
     }
 
     const client = new N8nClient({ apiUrl: n8nUrl, apiKey: n8nKey });
+    const aiService = AIService.getInstance();
     
     // 1a. Fetch Valid Node Types (New)
     let validNodeTypes: string[] = [];
@@ -390,12 +397,20 @@ export default class Test extends Command {
 
       const goal = `Validate and fix the workflow named "${workflowName}"`;
       
+      let testScenarios: any[] = [];
+      if (flags['ai-scenarios']) {
+          this.log(theme.agent("Generating AI test scenarios..."));
+          testScenarios = await aiService.generateTestScenarios(workflowData, goal);
+          this.log(theme.muted(`Generated ${testScenarios.length} scenarios.`));
+      }
+
       const initialState = {
           userGoal: goal,
           messages: [],
           validationErrors: [],
           workflowJson: workflowData,
-          availableNodeTypes: validNodeTypes
+          availableNodeTypes: validNodeTypes,
+          testScenarios: testScenarios
       };
 
       // We need to route the graph logger to our CLI logger if possible, or just let it print to stdout
@@ -582,15 +597,26 @@ export default class Test extends Command {
       }]);
       if (!save) return;
 
+      const docService = DocService.getInstance();
       for (const [, def] of deployedDefinitions.entries()) {
           const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
-          cleanData.name = def.name;
-          const targetPath = originalPath && def.type === 'root' ? originalPath : path.join(process.cwd(), 'workflows', `${def.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.json`);
+          
+          // Use AI to suggest title if it looks like a temporary name
+          let workflowName = def.name;
+          if (workflowName.startsWith('[n8m:test]') || workflowName.includes('Agentic_Test')) {
+              this.log(theme.agent("Suggesting professional project title..."));
+              workflowName = await docService.generateProjectTitle(cleanData);
+          }
+          cleanData.name = workflowName;
+
+          const slug = docService.generateSlug(workflowName);
+          const targetDir = path.join(process.cwd(), 'workflows', slug);
+          const targetPath = path.join(targetDir, 'workflow.json');
 
           const { confirmPath } = await inquirer.prompt([{
               type: 'input',
               name: 'confirmPath',
-              message: `Save '${def.name}' to:`,
+              message: `Save '${workflowName}' to:`,
               default: targetPath
           }]);
 
@@ -598,6 +624,16 @@ export default class Test extends Command {
               await fs.mkdir(path.dirname(confirmPath), { recursive: true });
               await fs.writeFile(confirmPath, JSON.stringify(cleanData, null, 2));
               this.log(theme.success(`Saved to ${confirmPath}`));
+              
+              // Optionally generate doc if it's a new directory
+              const readmePath = path.join(path.dirname(confirmPath), 'README.md');
+              if (!existsSync(readmePath)) {
+                  this.log(theme.agent("Generating initial documentation..."));
+                  const mermaid = docService.generateMermaid(cleanData);
+                  const readmeContent = await docService.generateReadme(cleanData);
+                  const fullDoc = `# ${workflowName}\n\n## Visual Flow\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n\n${readmeContent}`;
+                  await fs.writeFile(readmePath, fullDoc);
+              }
           } catch (e) {
               this.log(theme.fail(`Failed to save: ${(e as Error).message}`));
           }

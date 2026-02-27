@@ -69,7 +69,7 @@ const workflow = new StateGraph(TeamState)
 // Compile the graph with persistence and interrupts
 export const graph = workflow.compile({
   checkpointer: checkpointer,
-  interruptBefore: ["qa"], 
+  interruptBefore: ["engineer", "qa"], 
 });
 
 /**

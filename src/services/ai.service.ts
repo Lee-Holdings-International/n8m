@@ -470,6 +470,42 @@ export class AIService {
         return { selectedIndex: 0, reason: "Failed to parse AI response" };
     }
   }
+
+  /**
+   * Generates 3-5 diverse test scenarios (input payloads) for a workflow.
+   */
+  async generateTestScenarios(workflowJson: any, goal: string): Promise<any[]> {
+    const prompt = `You are an n8n QA Engineer.
+    Given the following workflow goal and structure, generate 3 diverse test scenarios (input payloads) to verify its robustness.
+    
+    Goal: ${goal}
+    
+    Workflow Summary (Nodes):
+    ${(workflowJson.nodes || []).map((n: any) => `- ${n.name} (${n.type})`).join('\n')}
+    
+    Generate 3 scenarios:
+    1. Happy Path: A standard, valid input that should succeed.
+    2. Edge Case: A valid but unusual input (e.g. empty strings, special characters, max values).
+    3. Error Case: An input that is likely to trigger a validation error or branch (e.g. missing required field, invalid format).
+    
+    Output a JSON array of objects, where each object has:
+    {
+      "name": "Scenario Description",
+      "payload": { ... input data ... },
+      "expectedBehavior": "What should happen"
+    }
+    
+    Output ONLY valid JSON. No commentary. No markdown.
+    `;
+
+    const response = await this.generateContent(prompt);
+    try {
+        const cleanJson = (response || "[]").replace(/```json\n?|\n?```/g, "").trim();
+        return JSON.parse(jsonrepair(cleanJson));
+    } catch {
+        return [{ name: "Default Test", payload: {}, expectedBehavior: "Success" }];
+    }
+  }
 }
 
 // Dummy for compilation fix

@@ -71,6 +71,7 @@ export const engineerNode = async (state: typeof TeamState.State) => {
        Specification:
        ${JSON.stringify(state.spec, null, 2)}
        ${ragContext}
+       ${state.userFeedback ? `\n\nUSER FEEDBACK / REFINEMENTS:\n${state.userFeedback}\n(Incorporate this feedback into the generation process)` : ""}
        
        IMPORTANT:
        1. Desciptive Naming: Name nodes descriptively (e.g. "Fetch Bitcoin Price" instead of "HTTP Request").
