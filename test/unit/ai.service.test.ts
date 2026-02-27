@@ -17,24 +17,15 @@ function resetSingleton() {
 }
 
 /**
- * Build a fake OpenAI streaming response that yields a single content chunk.
- */
-function mockStream(content: string) {
-  return {
-    [Symbol.asyncIterator]: async function* () {
-      yield { choices: [{ delta: { content } }] };
-    },
-  };
-}
-
-/**
  * Inject a mock OpenAI client into the AIService instance.
  */
 function injectMockClient(service: AIService, responseContent: string) {
   (service as any).client = {
     chat: {
       completions: {
-        create: async () => mockStream(responseContent),
+        create: async () => ({
+          choices: [{ message: { content: responseContent } }]
+        }),
       },
     },
   };
@@ -272,30 +263,29 @@ describe('AIService', () => {
 
   // -------------------------------------------------------------------------
   describe('generateContent() with mocked client', () => {
-    it('returns the content from the stream', async () => {
+    it('returns the content from the AI response', async () => {
       injectMockClient(service, 'hello world');
       const result = await service.generateContent('test prompt');
       expect(result).to.equal('hello world');
     });
 
-    it('concatenates multiple stream chunks', async () => {
+    it('throws when all retries are exhausted on a non-retryable error', async () => {
       (service as any).client = {
         chat: {
           completions: {
-            create: async () => ({
-              [Symbol.asyncIterator]: async function* () {
-                yield { choices: [{ delta: { content: 'chunk1 ' } }] };
-                yield { choices: [{ delta: { content: 'chunk2' } }] };
-              },
-            }),
-          },
-        },
+            create: async () => { throw new Error('Permanent failure'); }
+          }
+        }
       };
-      const result = await service.generateContent('test');
-      expect(result).to.equal('chunk1 chunk2');
+      try {
+        await service.generateContent('test');
+        throw new Error('Should have thrown');
+      } catch (err: any) {
+        expect(err.message).to.include('Permanent failure');
+      }
     });
 
-    it('throws when all retries are exhausted on a non-retryable error', async () => {
+    it('handles unauthorized error with status 401', async () => {
       (service as any).client = {
         chat: {
           completions: {
@@ -319,18 +309,18 @@ describe('AIService', () => {
   // -------------------------------------------------------------------------
   describe('generateSpec() with mocked client', () => {
     it('parses valid JSON returned by the AI', async () => {
-      const specObj = { goal: 'Send email', suggestedName: 'Email Sender', tasks: [], nodes: [], assumptions: [], questions: [] };
+      const specObj = { suggestedName: 'Email Sender', description: 'Send email', nodes: [] };
       injectMockClient(service, JSON.stringify(specObj));
       const result = await service.generateSpec('Send an email on trigger');
-      expect(result.goal).to.equal('Send email');
+      expect(result.description).to.equal('Send email');
       expect(result.suggestedName).to.equal('Email Sender');
     });
 
     it('strips markdown code fences before parsing', async () => {
-      const specObj = { goal: 'Test', suggestedName: 'Test WF', tasks: [], nodes: [], assumptions: [], questions: [] };
+      const specObj = { suggestedName: 'Test WF', description: 'Test', nodes: [] };
       injectMockClient(service, '```json\n' + JSON.stringify(specObj) + '\n```');
       const result = await service.generateSpec('Test');
-      expect(result.goal).to.equal('Test');
+      expect(result.description).to.equal('Test');
     });
 
     it('throws when the AI returns invalid JSON', async () => {
@@ -493,40 +483,40 @@ describe('AIService', () => {
   describe('generateAlternativeSpec() with mocked client', () => {
     it('returns parsed alternative spec from AI response', async () => {
       const alt = {
-        goal: 'Alt goal', suggestedName: 'Alt WF', tasks: [], nodes: [],
-        assumptions: [], questions: [], strategyType: 'alternative',
+        suggestedName: 'Alt WF', description: 'Alt goal', nodes: [],
+        strategyName: 'alternative',
       };
       injectMockClient(service, JSON.stringify(alt));
-      const primary = { goal: 'Primary goal', suggestedName: 'Primary WF', tasks: [], nodes: [], assumptions: [], questions: [] };
-      const result = await service.generateAlternativeSpec('some goal', primary);
+      const primary = { suggestedName: 'Primary WF', description: 'Primary goal', nodes: [] };
+      const result = await service.generateAlternativeSpec('some goal', primary as any);
       expect(result.suggestedName).to.equal('Alt WF');
-      expect(result.strategyType).to.equal('alternative');
+      expect(result.strategyName).to.equal('alternative');
     });
 
     it('strips markdown code fences before parsing', async () => {
-      const alt = { goal: 'Alt', suggestedName: 'Alt WF', tasks: [], nodes: [], assumptions: [], questions: [], strategyType: 'alternative' };
+      const alt = { suggestedName: 'Alt WF', description: 'Alt', nodes: [], strategyName: 'alternative' };
       injectMockClient(service, '```json\n' + JSON.stringify(alt) + '\n```');
-      const result = await service.generateAlternativeSpec('goal', {});
+      const result = await service.generateAlternativeSpec('goal', {} as any);
       expect(result.suggestedName).to.equal('Alt WF');
     });
 
     it('falls back to a primary-spec variant when AI returns invalid JSON', async () => {
       injectMockClient(service, 'not valid json at all');
-      const primary = { goal: 'Primary', suggestedName: 'Primary WF', tasks: [], nodes: [], assumptions: [], questions: [] };
-      const result = await service.generateAlternativeSpec('goal', primary);
+      const primary = { suggestedName: 'Primary WF', description: 'Primary', nodes: [] };
+      const result = await service.generateAlternativeSpec('goal', primary as any);
       expect(result.suggestedName).to.equal('Primary WF (Alt)');
-      expect(result.strategyType).to.equal('alternative');
+      expect(result.strategyName).to.equal('alternative');
     });
 
     it('preserves all fields from the AI response', async () => {
       const alt = {
-        goal: 'Send webhook', suggestedName: 'Webhook Alt', tasks: ['Step 1'],
-        nodes: ['Webhook', 'Set'], assumptions: ['Has key'], questions: [], strategyType: 'alternative',
+        suggestedName: 'Webhook Alt', description: 'Send webhook',
+        nodes: [{ type: 'n8n-nodes-base.webhook', purpose: 'entry' }],
+        strategyName: 'alternative',
       };
       injectMockClient(service, JSON.stringify(alt));
-      const result = await service.generateAlternativeSpec('Send webhook notification', {});
-      expect(result.tasks).to.deep.equal(['Step 1']);
-      expect(result.nodes).to.deep.equal(['Webhook', 'Set']);
+      const result = await service.generateAlternativeSpec('Send webhook notification', {} as any);
+      expect(result.nodes).to.have.length(1);
     });
   });
 

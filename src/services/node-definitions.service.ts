@@ -57,7 +57,7 @@ export class NodeDefinitionsService {
             } else {
                 console.log(`Loaded ${this.definitions.length} node definitions.`);
             }
-        } catch (error) {
+        } catch {
             console.error("Failed to load node definitions from n8n instance (fetch failed).");
             this.loadFallback();
         }

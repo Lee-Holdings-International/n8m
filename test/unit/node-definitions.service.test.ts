@@ -269,7 +269,9 @@ describe('NodeDefinitionsService', () => {
         },
       };
       await service.loadDefinitions();
-      expect((service as any).definitions).to.deep.equal([]);
+      // The service now loads fallback definitions instead of returning an empty array
+      expect((service as any).definitions).to.not.be.empty;
+      expect((service as any).definitions[0]).to.have.property('name');
     });
   });
 });

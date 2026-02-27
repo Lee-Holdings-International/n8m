@@ -113,7 +113,7 @@ export const engineerNode = async (state: typeof TeamState.State) => {
     }
 
     if (result.workflows && Array.isArray(result.workflows)) {
-      result.workflows = result.workflows.map((wf: any) => fixHallucinatedNodes(wf));
+      result.workflows = result.workflows.map((wf: any) => aiService.fixHallucinatedNodes(wf));
     }
 
     return {
@@ -129,86 +129,4 @@ export const engineerNode = async (state: typeof TeamState.State) => {
   }
 };
 
-/**
- * Auto-correct common n8n node type hallucinations
- */
-function fixHallucinatedNodes(workflow: any): any {
-  if (!workflow.nodes || !Array.isArray(workflow.nodes)) return workflow;
-  
-  const corrections: Record<string, string> = {
-      "n8n-nodes-base.rssFeed": "n8n-nodes-base.rssFeedRead",
-      "rssFeed": "n8n-nodes-base.rssFeedRead",
-      "n8n-nodes-base.gpt": "n8n-nodes-base.openAi",
-      "n8n-nodes-base.openai": "n8n-nodes-base.openAi",
-      "openai": "n8n-nodes-base.openAi",
-      "n8n-nodes-base.openAiChat": "n8n-nodes-base.openAi",
-      "n8n-nodes-base.openAIChat": "n8n-nodes-base.openAi",
-      "n8n-nodes-base.openaiChat": "n8n-nodes-base.openAi",
-      "n8n-nodes-base.gemini": "n8n-nodes-base.googleGemini",
-      "n8n-nodes-base.cheerioHtml": "n8n-nodes-base.htmlExtract",
-      "cheerioHtml": "n8n-nodes-base.htmlExtract",
-      "n8n-nodes-base.schedule": "n8n-nodes-base.scheduleTrigger",
-      "schedule": "n8n-nodes-base.scheduleTrigger",
-      "n8n-nodes-base.cron": "n8n-nodes-base.scheduleTrigger",
-      "n8n-nodes-base.googleCustomSearch": "n8n-nodes-base.googleGemini",
-      "googleCustomSearch": "n8n-nodes-base.googleGemini"
-  };
-
-  workflow.nodes = workflow.nodes.map((node: any) => {
-      if (node.type && corrections[node.type]) {
-          node.type = corrections[node.type];
-      }
-      // Ensure base prefix if missing
-      if (node.type && !node.type.startsWith('n8n-nodes-base.') && !node.type.includes('.')) {
-           node.type = `n8n-nodes-base.${node.type}`;
-      }
-      return node;
-  });
-
-  return fixN8nConnections(workflow);
-}
-
-/**
- * Force-fix connection structure to prevent "object is not iterable" errors
- */
-function fixN8nConnections(workflow: any): any {
-  if (!workflow.connections || typeof workflow.connections !== 'object') return workflow;
-  
-  const fixedConnections: any = {};
-  
-  for (const [sourceNode, targets] of Object.entries(workflow.connections)) {
-      if (!targets || typeof targets !== 'object') continue;
-      const targetObj = targets as any;
-
-      // 2. Ensure "main" exists and is an array
-      if (targetObj.main) {
-          let mainArr = targetObj.main;
-          if (!Array.isArray(mainArr)) mainArr = [[ { node: String(mainArr), type: 'main', index: 0 } ]];
-          
-          const fixedMain = mainArr.map((segment: any) => {
-              if (!segment) return [];
-              if (!Array.isArray(segment)) {
-                  // Wrap in array if it's a single object
-                  return [segment];
-              }
-              return segment.map((conn: any) => {
-                  if (!conn) return { node: 'Unknown', type: 'main', index: 0 };
-                  if (typeof conn === 'string') return { node: conn, type: 'main', index: 0 };
-                  return {
-                      node: String(conn.node || 'Unknown'),
-                      type: conn.type || 'main',
-                      index: conn.index || 0
-                    };
-                });
-            });
-          
-          fixedConnections[sourceNode] = { main: fixedMain };
-      } else {
-          // If it's just raw data like { "Source": { "node": "Target" } }, wrap it
-          fixedConnections[sourceNode] = targetObj;
-      }
-  }
-  
-  workflow.connections = fixedConnections;
-  return workflow;
-}
+// Local helpers removed, using AIService methods instead.
