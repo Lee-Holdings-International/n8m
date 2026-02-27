@@ -1,5 +1,5 @@
 {
-  "name": "n8m",
+  "name": "@lhi/n8m",
   "version": "0.1.0",
   "description": "Agentic n8n CLI wrapper - A Skill Bridge for n8n workflow automation",
   "author": "n8m",
