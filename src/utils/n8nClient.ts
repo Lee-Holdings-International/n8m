@@ -34,12 +34,39 @@ export class N8nClient {
     this.apiUrl = config?.apiUrl ?? process.env.N8N_API_URL ?? 'http://localhost:5678/api/v1'
     this.apiKey = config?.apiKey ?? process.env.N8N_API_KEY ?? ''
 
+    // Normalize: ensure the URL ends with /api/v1 (config may store bare base URL)
+    if (!this.apiUrl.includes('/api/v1')) {
+      this.apiUrl = this.apiUrl.replace(/\/?$/, '') + '/api/v1'
+    }
+
     // Constructor validation moved to method call time to allow lazy loading
-    // from config file if not provided here. 
+    // from config file if not provided here.
     this.headers = {
       'Content-Type': 'application/json',
       'X-N8N-API-KEY': this.apiKey,
     }
+  }
+
+  /**
+   * Assert that an API response is OK, throwing an actionable error for 401/403.
+   */
+  private async assertOk(response: Response, operation: string): Promise<void> {
+    if (response.ok) return;
+    const errorText = await response.text();
+    if (response.status === 403) {
+      throw new Error(
+        `${operation} failed (403 Forbidden). Your n8n API key does not have permission to access this resource. ` +
+        `In n8n, go to Settings → n8n API and ensure the key belongs to the same owner/project as the workflow. ` +
+        `n8n says: ${errorText}`
+      );
+    }
+    if (response.status === 401) {
+      throw new Error(
+        `${operation} failed (401 Unauthorized). Your n8n API key is missing or invalid. ` +
+        `Run: n8m config --n8n-key <your-key>`
+      );
+    }
+    throw new Error(`${operation} failed: ${response.status} - ${errorText}`);
   }
 
   /**
@@ -51,10 +78,7 @@ export class N8nClient {
       method: 'POST',
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Failed to activate workflow: ${response.status} - ${errorText}`)
-    }
+    await this.assertOk(response, 'activate workflow')
   }
 
   /**
@@ -66,10 +90,7 @@ export class N8nClient {
       method: 'POST',
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Failed to deactivate workflow: ${response.status} - ${errorText}`)
-    }
+    await this.assertOk(response, 'deactivate workflow')
   }
 
   /**
@@ -84,10 +105,7 @@ export class N8nClient {
         method: 'POST',
       })
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`n8n Validation Error: ${response.status} - ${errorText}`)
-      }
+      await this.assertOk(response, 'execute workflow')
 
       // If activation succeeds, we assume basic validation passed.
       const result = await response.json()
@@ -113,9 +131,7 @@ export class N8nClient {
         method: 'GET',
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to get execution: ${response.status}`)
-      }
+      await this.assertOk(response, 'get execution')
 
       return response.json()
     } catch (error) {
@@ -138,9 +154,7 @@ export class N8nClient {
         method: 'GET',
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to get executions: ${response.status}`)
-      }
+      await this.assertOk(response, 'get workflow executions')
 
       const result = await response.json();
       return result.data;
@@ -154,16 +168,14 @@ export class N8nClient {
    */
   async updateWorkflow(workflowId: string, workflowData: unknown): Promise<void> {
     try {
+      const sanitized = this.sanitizeSettings(workflowData as Record<string, unknown>);
       const response = await fetch(`${this.apiUrl}/workflows/${workflowId}`, {
-        body: JSON.stringify(workflowData),
+        body: JSON.stringify(sanitized),
         headers: this.headers,
         method: 'PUT',
       })
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to update workflow: ${response.status} - ${errorText}`)
-      }
+      await this.assertOk(response, 'update workflow')
     } catch (error) {
       throw new Error(`Failed to update workflow: ${(error as Error).message}`)
     }
@@ -179,9 +191,7 @@ export class N8nClient {
         method: 'GET',
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to get workflow: ${response.status}`)
-      }
+      await this.assertOk(response, 'get workflow')
 
       return response.json()
     } catch (error) {
@@ -190,14 +200,27 @@ export class N8nClient {
   }
 
   /**
+   * Strip invalid timezone from workflow settings so n8n activation never 400s.
+   */
+  private sanitizeSettings(data: Record<string, unknown>): Record<string, unknown> {
+    if (!data.settings || typeof data.settings !== 'object') return data;
+    const settings = { ...(data.settings as Record<string, unknown>) };
+    // Always remove timezone — n8n validates against its own list and AI-generated
+    // values (including seemingly valid ones like "UTC") cause activation 400s.
+    // n8n will use the instance-level default timezone instead.
+    delete settings.timezone;
+    return { ...data, settings };
+  }
+
+  /**
    * Create a new workflow
    */
   async createWorkflow(name: string, workflowData: unknown): Promise<{id: string}> {
     try {
-      const payload = {
+      const payload = this.sanitizeSettings({
         name,
         ...(workflowData as Record<string, unknown>),
-      }
+      })
       
       // Debug logging for payload validation errors
       // console.log('DEBUG: createWorkflow payload keys:', Object.keys(payload));
@@ -208,10 +231,7 @@ export class N8nClient {
         method: 'POST',
       })
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`Failed to create workflow: ${response.status} - ${errorText}`)
-      }
+      await this.assertOk(response, 'create workflow')
 
       const result = await response.json()
       return {id: result.id}
@@ -221,128 +241,46 @@ export class N8nClient {
   }
 
   /**
-   * Get all installed node types via Probe Workflow (Webhook)
-   * 
-   * Strategy:
-   * 1. Create a workflow with Webhook -> HTTP Request (Internal API)
-   * 2. Activate it
-   * 3. Call the webhook -> Returns the node types
-   */
-  /**
-   * Get all installed node types via Probe Workflow (Webhook)
-   * Returns full node type objects including parameters, not just names.
+   * Get all installed node types directly from the n8n REST API.
+   * Handles paginated responses and returns the full node type objects.
    */
   async getNodeTypes(): Promise<any[]> {
-    const probeId = `probe-${Math.random().toString(36).substring(7)}`;
-    const probePath = `n8m-probe-${Math.random().toString(36).substring(7)}`;
-    let workflowId: string | null = null;
-    
     try {
-      const internalApiUrl = this.apiUrl + '/node-types';
-      
-      const probeWorkflow = {
-          name: `[n8m:system] Node Probe ${probeId}`,
-          nodes: [
-            {
-              parameters: {
-                httpMethod: "GET",
-                path: probePath,
-                responseMode: "lastNode", 
-                options: {}
-              },
-              id: "webhook",
-              name: "ProbeWebhook",
-              type: "n8n-nodes-base.webhook",
-              typeVersion: 1,
-              position: [400, 300],
-              webhookId: probePath
-            },
-            {
-              parameters: {
-                url: internalApiUrl,
-                method: "GET",
-                authentication: "none",
-                sendHeaders: true,
-                headerParameters: {
-                  parameters: [
-                    {
-                      name: "X-N8N-API-KEY",
-                      value: this.apiKey
-                    }
-                  ]
-                },
-                options: {}
-              },
-              id: "http-request",
-              name: "FetchNodes",
-              type: "n8n-nodes-base.httpRequest",
-              typeVersion: 4.1,
-              position: [600, 300]
-            }
-          ],
-          connections: {
-            "ProbeWebhook": {
-              main: [[{ node: "FetchNodes", type: "main", index: 0 }]]
-            }
-          },
-          settings: {
-              saveManualExecutions: false,
-              callerPolicy: 'workflowsFromSameOwner'
-          }
-      };
+      let all: any[] = [];
+      let cursor: string | undefined = undefined;
 
-      // Header Injection
-      (probeWorkflow.nodes[1] as any).parameters.authentication = 'none';
-      (probeWorkflow.nodes[1] as any).parameters.headerParameters = {
-          parameters: [
-              { name: 'X-N8N-API-KEY', value: this.apiKey }
-          ]
-      };
-      
-      // 1. Create
-      const { id } = await this.createWorkflow(probeWorkflow.name, probeWorkflow);
-      workflowId = id;
-      
-      // 2. Activate
-      await this.activateWorkflow(id);
-      
-      // 3. Trigger
-      const baseUrl = this.apiUrl.replace('/api/v1', '');
-      const webhookUrl = `${baseUrl}/webhook/${probePath}`;
-      
-      console.log(`[N8nClient] Triggering probe at ${webhookUrl}...`);
-      const response = await fetch(webhookUrl);
-      
-      if (!response.ok) {
-          const errorText = await response.text();
-          if (process.env.DEBUG) {
-             console.warn(`[N8nClient] Probe webhook failed (Status ${response.status}): ${errorText}`);
-          }
-          throw new Error(`Probe webhook failed: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      // Return full objects
-      if (Array.isArray(result)) {
-           return result;
-      } 
-      
-      if (result.data && Array.isArray(result.data)) {
-           return result.data;
-      }
+      do {
+        const url = new URL(`${this.apiUrl}/node-types`);
+        if (cursor) url.searchParams.set('cursor', cursor);
 
-      return [];
-      
-    } catch (error) {
-      if (process.env.DEBUG) {
-        console.warn(`[N8nClient] Probe failed: ${(error as Error).message}`);
-      }
-      return [];
-    } finally {
-        if (workflowId) {
-            try { await this.deleteWorkflow(workflowId); } catch { /* intentionally empty */ }
+        const response = await fetch(url.toString(), {
+          headers: this.headers,
+          method: 'GET',
+        });
+
+        if (!response.ok) {
+          console.warn(`[N8nClient] node-types request failed (${response.status}) — validation/shimming disabled`);
+          return [];
         }
+
+        const result = await response.json();
+
+        if (Array.isArray(result)) {
+          all = [...all, ...result];
+          cursor = undefined;
+        } else if (result.data && Array.isArray(result.data)) {
+          all = [...all, ...result.data];
+          cursor = result.nextCursor ?? undefined;
+        } else {
+          // Unknown format — stop paging
+          break;
+        }
+      } while (cursor);
+
+      return all;
+    } catch (error) {
+      console.warn(`[N8nClient] Failed to fetch node types: ${(error as Error).message}`);
+      return [];
     }
   }
 
@@ -365,9 +303,7 @@ export class N8nClient {
             method: 'GET',
           })
 
-          if (!response.ok) {
-            throw new Error(`Failed to get workflows: ${response.status}`)
-          }
+          await this.assertOk(response, 'get workflows')
 
           const result = await response.json();
           allWorkflows = [...allWorkflows, ...result.data];
@@ -391,9 +327,7 @@ export class N8nClient {
         method: 'DELETE',
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to delete workflow: ${response.status}`)
-      }
+      await this.assertOk(response, 'delete workflow')
     } catch (error) {
       throw new Error(`Failed to delete workflow: ${(error as Error).message}`)
     }

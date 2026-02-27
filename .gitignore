@@ -11,9 +11,9 @@ oclif.manifest.json
 !.env.example
 
 # Tooling
-.agent
 .gemini
 .vercel
+.agent
 
 # Debug logs
 npm-debug.log*

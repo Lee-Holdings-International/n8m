@@ -235,6 +235,14 @@ npm run dev
 
 ---
 
+## Sponsors
+
+### Partially Sponsored By
+
+[The Daily Caller](https://dailycaller.com)
+
+---
+
 ## Roadmap
 
 - [x] Agentic graph (Architect → Engineer → QA)

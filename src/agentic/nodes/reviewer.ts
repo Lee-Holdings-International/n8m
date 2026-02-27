@@ -79,6 +79,7 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
   // Triggers usually have no input.
   // We use a broader check: any node with "trigger" or "webhook" in the name, plus generic start types.
   const isTrigger = (type: string) => {
+      if (!type) return false;
       const lower = type.toLowerCase();
       return lower.includes('trigger') || 
              lower.includes('webhook') || 
@@ -93,9 +94,9 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
            // Sticky notes and Merge nodes can be tricky, but generally Merge needs input.
            if (!node.type.includes('StickyNote')) {
                 // Double check for "On Execution" (custom trigger name sometimes used)
-                if (!node.name.toLowerCase().includes('trigger') && !node.name.toLowerCase().includes('webhook')) {
-                     console.log(theme.warn(`[Reviewer] Validated disconnection: Node "${node.name}" has no incoming connections.`));
-                     validationErrors.push(`Node "${node.name}" (${node.type}) is disconnected (orphaned). Connect it or remove it.`);
+                if (!node.name || (!node.name.toLowerCase().includes('trigger') && !node.name.toLowerCase().includes('webhook'))) {
+                     console.log(theme.warn(`[Reviewer] Validated disconnection: Node "${node.name || 'Unnamed'}" has no incoming connections.`));
+                     validationErrors.push(`Node "${node.name || 'Unnamed'}" (${node.type || 'unknown type'}) is disconnected (orphaned). Connect it or remove it.`);
                 }
            }
       }

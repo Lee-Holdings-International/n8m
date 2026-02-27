@@ -264,7 +264,7 @@ describe('N8nClient', () => {
 
     it('throws on error response', async () => {
       (global as any).fetch = () => mockResponse({ message: 'Not found' }, 404);
-      await expectThrows(() => client.activateWorkflow('nope'), 'Failed to activate workflow');
+      await expectThrows(() => client.activateWorkflow('nope'), 'activate workflow failed');
     });
   });
 
@@ -282,7 +282,7 @@ describe('N8nClient', () => {
 
     it('throws on error response', async () => {
       (global as any).fetch = () => mockResponse({}, 403);
-      await expectThrows(() => client.deactivateWorkflow('no-perms'), 'Failed to deactivate workflow');
+      await expectThrows(() => client.deactivateWorkflow('no-perms'), '403 Forbidden');
     });
   });
 

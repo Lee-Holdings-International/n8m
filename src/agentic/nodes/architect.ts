@@ -45,9 +45,19 @@ export const architectNode = async (state: typeof TeamState.State) => {
     // Both are handed off to separate Engineer agents that run concurrently.
     const alternativeSpec = await aiService.generateAlternativeSpec(state.userGoal, spec);
 
+    const alternativeModel = aiService.getAlternativeModel();
+
     const strategies = [
-      { ...spec,            strategyName: "Primary Strategy"      },
-      { ...alternativeSpec, strategyName: "Alternative Strategy"  },
+      { 
+        ...spec, 
+        strategyName: "Primary Strategy", 
+        aiModel: aiService.getDefaultModel()
+      },
+      { 
+        ...alternativeSpec, 
+        strategyName: "Alternative Strategy", 
+        aiModel: alternativeModel
+      },
     ];
 
     const logEntry = `Architect: Generated 2 strategies — "${strategies[0].suggestedName}" (primary) and "${strategies[1].suggestedName}" (alternative)`;

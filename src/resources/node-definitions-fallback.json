@@ -1,0 +1,213 @@
+[
+  {
+    "name": "n8n-nodes-base.start",
+    "displayName": "Manual Trigger",
+    "description": "The starting point for manual execution.",
+    "properties": []
+  },
+  {
+    "name": "n8n-nodes-base.httpRequest",
+    "displayName": "HTTP Request",
+    "description": "Send HTTP requests to any API",
+    "properties": [
+      {
+        "name": "method",
+        "displayName": "Method",
+        "type": "options",
+        "default": "GET",
+        "options": [
+          { "name": "GET", "value": "GET" },
+          { "name": "POST", "value": "POST" },
+          { "name": "PUT", "value": "PUT" },
+          { "name": "DELETE", "value": "DELETE" }
+        ]
+      },
+      {
+        "name": "url",
+        "displayName": "URL",
+        "type": "string",
+        "default": "",
+        "description": "The URL to send the request to"
+      },
+      {
+        "name": "authentication",
+        "displayName": "Authentication",
+        "type": "options",
+        "default": "none",
+        "options": [
+          { "name": "None", "value": "none" },
+          { "name": "Predefined Credential Type", "value": "predefinedCredentialType" }
+        ]
+      },
+      {
+        "name": "sendBody",
+        "displayName": "Send Body",
+        "type": "boolean",
+        "default": false
+      },
+      {
+        "name": "body",
+        "displayName": "Body",
+        "type": "json",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.slack",
+    "displayName": "Slack",
+    "description": "Interact with Slack",
+    "properties": [
+      {
+        "name": "resource",
+        "displayName": "Resource",
+        "type": "options",
+        "default": "message",
+        "options": [
+          { "name": "Message", "value": "message" },
+          { "name": "Channel", "value": "channel" }
+        ]
+      },
+      {
+        "name": "operation",
+        "displayName": "Operation",
+        "type": "options",
+        "default": "post",
+        "options": [
+          { "name": "Post", "value": "post" },
+          { "name": "Update", "value": "update" }
+        ]
+      },
+      {
+        "name": "channel",
+        "displayName": "Channel",
+        "type": "string",
+        "default": ""
+      },
+      {
+        "name": "text",
+        "displayName": "Text",
+        "type": "string",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.googleSheets",
+    "displayName": "Google Sheets",
+    "description": "Interact with Google Sheets",
+    "properties": [
+      {
+        "name": "resource",
+        "displayName": "Resource",
+        "type": "options",
+        "default": "sheet",
+        "options": [
+          { "name": "Sheet", "value": "sheet" }
+        ]
+      },
+      {
+        "name": "operation",
+        "displayName": "Operation",
+        "type": "options",
+        "default": "append",
+        "options": [
+          { "name": "Append", "value": "append" },
+          { "name": "Read", "value": "read" },
+          { "name": "Update", "value": "update" }
+        ]
+      },
+      {
+        "name": "sheetId",
+        "displayName": "Sheet ID",
+        "type": "string",
+        "default": ""
+      },
+      {
+        "name": "range",
+        "displayName": "Range",
+        "type": "string",
+        "default": "Sheet1!A:Z"
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.if",
+    "displayName": "IF",
+    "description": "Conditional logic: True/False",
+    "properties": [
+      {
+        "name": "conditions",
+        "displayName": "Conditions",
+        "type": "json",
+        "default": {}
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.set",
+    "displayName": "Set",
+    "description": "Set variables or values",
+    "properties": [
+      {
+        "name": "values",
+        "displayName": "Values",
+        "type": "fixedCollection",
+        "default": {}
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.webhook",
+    "displayName": "Webhook",
+    "description": "Receive HTTP requests",
+    "properties": [
+      {
+        "name": "httpMethod",
+        "displayName": "HTTP Method",
+        "type": "options",
+        "default": "GET",
+        "options": [
+          { "name": "GET", "value": "GET" },
+          { "name": "POST", "value": "POST" }
+        ]
+      },
+      {
+        "name": "path",
+        "displayName": "Path",
+        "type": "string",
+        "default": ""
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.code",
+    "displayName": "Code",
+    "description": "Run JavaScript/TypeScript",
+    "properties": [
+      {
+        "name": "jsCode",
+        "displayName": "JS Code",
+        "type": "string",
+        "default": "// Your code here\nreturn items;"
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.merge",
+    "displayName": "Merge",
+    "description": "Merge data from multiple inputs",
+    "properties": [
+      {
+        "name": "mode",
+        "displayName": "Mode",
+        "type": "options",
+        "default": "append",
+        "options": [
+          { "name": "Append", "value": "append" },
+          { "name": "Merge by Index", "value": "mergeByIndex" }
+        ]
+      }
+    ]
+  }
+]

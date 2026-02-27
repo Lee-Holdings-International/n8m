@@ -1,6 +1,7 @@
 import { AIService } from "../../services/ai.service.js";
 import { TeamState } from "../state.js";
 import { NodeDefinitionsService } from "../../services/node-definitions.service.js";
+import { jsonrepair } from "jsonrepair";
 
 export const engineerNode = async (state: typeof TeamState.State) => {
   const aiService = AIService.getInstance();
@@ -14,8 +15,10 @@ export const engineerNode = async (state: typeof TeamState.State) => {
   
   // Search for relevant nodes (limit 8 to save context)
   const relevantDefs = nodeService.search(queryText, 8);
-  const ragContext = relevantDefs.length > 0 
-      ? `\n\n[AVAILABLE NODE SCHEMAS - USE THESE EXACT PARAMETERS]\n${nodeService.formatForLLM(relevantDefs)}` 
+  const staticRef = nodeService.getStaticReference();
+  
+  const ragContext = (relevantDefs.length > 0 || staticRef)
+      ? `\n\n[N8N NODE REFERENCE GUIDE]\n${staticRef}\n\n[AVAILABLE NODE SCHEMAS - USE THESE EXACT PARAMETERS]\n${nodeService.formatForLLM(relevantDefs)}` 
       : "";
 
   if (relevantDefs.length > 0) {
@@ -34,7 +37,7 @@ export const engineerNode = async (state: typeof TeamState.State) => {
           const fixedWorkflow = await aiService.generateWorkflowFix(
               state.workflowJson,
               errorContext,
-              undefined,
+              state.spec?.aiModel, // Pass model if available
               false,
               state.availableNodeTypes || []
           );
@@ -94,15 +97,18 @@ export const engineerNode = async (state: typeof TeamState.State) => {
        `;
 
     // Using AIService just for the LLM call to keep auth logic dry
-    const response = await aiService.generateContent(prompt);
+    const response = await aiService.generateContent(prompt, {
+        provider: state.spec.aiProvider,
+        model: state.spec.aiModel
+    });
     let cleanJson = response || "{}";
     cleanJson = cleanJson.replace(/```json\n?|\n?```/g, "").trim();
 
     let result;
     try {
-      result = JSON.parse(cleanJson);
-    } catch (e) {
-      console.error("Failed to parse workflow JSON from spec", e);
+      result = JSON.parse(jsonrepair(cleanJson));
+    } catch (e2) {
+      console.error("Failed to parse workflow JSON from spec", e2);
       throw new Error("AI generated invalid JSON for workflow from spec");
     }
 
@@ -111,9 +117,10 @@ export const engineerNode = async (state: typeof TeamState.State) => {
     }
 
     return {
-      workflowJson: result,
-      // For parallel execution, push to candidates
-      candidates: [result], 
+      // Only push to candidates — the Supervisor sets workflowJson after fan-in.
+      // Writing workflowJson here would cause a LastValue conflict when two
+      // Engineers run in parallel via Send().
+      candidates: [result],
     };
 
   } catch (error) {

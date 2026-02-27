@@ -14,8 +14,9 @@ export const qaNode = async (state: typeof TeamState.State) => {
 
   // 1. Load Credentials
   const config = await ConfigManager.load();
-  const n8nUrl = config.n8nUrl || process.env.N8N_API_URL;
-  const n8nKey = config.n8nKey || process.env.N8N_API_KEY;
+  // Env vars take priority over stored config so a fresh key in .env is always used
+  const n8nUrl = process.env.N8N_API_URL || config.n8nUrl;
+  const n8nKey = process.env.N8N_API_KEY || config.n8nKey;
 
   if (!n8nUrl || !n8nKey) {
     throw new Error('Credentials missing. Configure environment via \'n8m config\'.');
@@ -37,12 +38,26 @@ export const qaNode = async (state: typeof TeamState.State) => {
     }
 
     const workflowName = targetWorkflow.name || 'Agentic_Test_Workflow';
+
+    // Drop timezone — sanitizeSettings in N8nClient strips it unconditionally
+    const rawSettings = { ...(targetWorkflow.settings || {}) };
+    delete rawSettings.timezone;
+
+    // Strip credentials from all nodes — n8n 2.x refuses to activate ("publish")
+    // a workflow that references credentials that don't exist on the instance.
+    // Structural validation can still run; only live execution of credentialed
+    // nodes will be skipped/fail, which is expected for an ephemeral test.
+    const strippedNodes = (targetWorkflow.nodes as any[]).map((node: any) => {
+      const { credentials: _creds, ...rest } = node;
+      return rest;
+    });
+
     const rootPayload = {
-      nodes: targetWorkflow.nodes,
+      nodes: strippedNodes,
       connections: targetWorkflow.connections,
-      settings: targetWorkflow.settings || {},
+      settings: rawSettings,
       staticData: targetWorkflow.staticData || {},
-      name: `[n8m:test] ${workflowName}`, 
+      name: `[n8m:test] ${workflowName}`,
     };
 
     // Shim trigger if needed (reusing logic from test.ts)

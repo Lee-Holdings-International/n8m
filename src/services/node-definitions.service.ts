@@ -1,5 +1,11 @@
 import { N8nClient } from '../utils/n8nClient.js';
 import { ConfigManager } from '../utils/config.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface ReducedNodeDefinition {
     name: string;
@@ -14,9 +20,8 @@ export class NodeDefinitionsService {
     private client: N8nClient;
 
     private constructor() {
-        const n8nUrl = process.env.N8N_API_URL;
-        const n8nKey = process.env.N8N_API_KEY;
-        this.client = new N8nClient({ apiUrl: n8nUrl, apiKey: n8nKey });
+        // Will be overridden in loadDefinitions() once config is available
+        this.client = new N8nClient();
     }
 
     public static getInstance(): NodeDefinitionsService {
@@ -37,17 +42,70 @@ export class NodeDefinitionsService {
         try {
             // Re-initialize client if env vars changed (e.g. after config load)
             const config = await ConfigManager.load();
-            if (config.n8nUrl && config.n8nKey) {
-                this.client = new N8nClient({ apiUrl: config.n8nUrl, apiKey: config.n8nKey });
+            // Env vars take priority over stored config
+            const apiUrl = process.env.N8N_API_URL || config.n8nUrl;
+            const apiKey = process.env.N8N_API_KEY || config.n8nKey;
+            if (apiUrl && apiKey) {
+                this.client = new N8nClient({ apiUrl, apiKey });
             }
             
             this.definitions = await this.client.getNodeTypes();
-            console.log(`Loaded ${this.definitions.length} node definitions.`);
+            
+            if (this.definitions.length === 0) {
+                console.warn("No node definitions returned from n8n instance. Attempting fallback...");
+                this.loadFallback();
+            } else {
+                console.log(`Loaded ${this.definitions.length} node definitions.`);
+            }
         } catch (error) {
-            console.error("Failed to load node definitions:", error);
-            // Fallback to empty to allow process to continue without RAG
+            console.error("Failed to load node definitions from n8n instance (fetch failed).");
+            this.loadFallback();
+        }
+    }
+
+    private loadFallback(): void {
+        try {
+            // Check multiple potential locations (dist vs src)
+            const paths = [
+                path.join(__dirname, '..', 'resources', 'node-definitions-fallback.json'), // dist
+                path.join(__dirname, '..', '..', 'src', 'resources', 'node-definitions-fallback.json') // src (dev)
+            ];
+
+            let fallbackPath = '';
+            for (const p of paths) {
+                if (fs.existsSync(p)) {
+                    fallbackPath = p;
+                    break;
+                }
+            }
+
+            if (fallbackPath) {
+                const fallbackData = fs.readFileSync(fallbackPath, 'utf8');
+                this.definitions = JSON.parse(fallbackData);
+                console.log(`Loaded ${this.definitions.length} node definitions (from fallback at ${path.basename(path.dirname(fallbackPath))}).`);
+            } else {
+                console.warn("Fallback node definitions file not found in searched locations.");
+                this.definitions = [];
+            }
+        } catch (fallbackError) {
+            console.error("Failed to load fallback node definitions:", fallbackError);
             this.definitions = [];
         }
+    }
+
+    /**
+     * Get the human-readable static reference document
+     */
+    public getStaticReference(): string {
+        try {
+            const docPath = path.join(__dirname, '..', '..', 'docs', 'N8N_NODE_REFERENCE.md');
+            if (fs.existsSync(docPath)) {
+                return fs.readFileSync(docPath, 'utf8');
+            }
+        } catch (e) {
+            console.error("Failed to read N8N_NODE_REFERENCE.md", e);
+        }
+        return "";
     }
 
     /**
