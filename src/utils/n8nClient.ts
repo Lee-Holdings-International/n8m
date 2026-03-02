@@ -147,7 +147,7 @@ export class N8nClient {
     try {
       const url = new URL(`${this.apiUrl}/executions`);
       url.searchParams.set('workflowId', workflowId);
-      url.searchParams.set('limit', '5'); 
+      url.searchParams.set('limit', '25');
 
       const response = await fetch(url.toString(), {
         headers: this.headers,
@@ -221,9 +221,6 @@ export class N8nClient {
         name,
         ...(workflowData as Record<string, unknown>),
       })
-      
-      // Debug logging for payload validation errors
-      // console.log('DEBUG: createWorkflow payload keys:', Object.keys(payload));
 
       const response = await fetch(`${this.apiUrl}/workflows`, {
         body: JSON.stringify(payload),
@@ -236,7 +233,11 @@ export class N8nClient {
       const result = await response.json()
       return {id: result.id}
     } catch (error) {
-      throw new Error(`Failed to create workflow: ${(error as Error).message}`)
+      const msg = (error as Error).message;
+      if (msg === 'fetch failed' || msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND')) {
+        throw new Error(`Cannot connect to n8n at ${this.apiUrl}. Ensure n8n is running and the URL is correct.`);
+      }
+      throw new Error(`Failed to create workflow: ${msg}`)
     }
   }
 
@@ -259,7 +260,6 @@ export class N8nClient {
         });
 
         if (!response.ok) {
-          console.warn(`[N8nClient] node-types request failed (${response.status}) — validation/shimming disabled`);
           return [];
         }
 
@@ -428,6 +428,64 @@ export class N8nClient {
           nodes,
           connections
       };
+  }
+
+  /**
+   * Temporarily set pin data on a workflow so test executions receive
+   * synthetic binary data instead of running binary-generating nodes live.
+   * Pass pinData:{} to clear injected pins and restore the original state.
+   *
+   * The public /api/v1/ schema may reject pinData as an "additional property".
+   * In that case we fall back to the internal /rest/ API that n8n's own UI uses,
+   * which accepts pinData without schema restriction.
+   */
+  async setPinData(workflowId: string, workflowData: any, pinData: Record<string, any[]>): Promise<void> {
+    const settings = { ...(workflowData.settings || {}) };
+    delete settings.timezone; // n8n rejects many timezone values
+    const payload: Record<string, unknown> = {
+      name: workflowData.name,
+      nodes: workflowData.nodes,
+      connections: workflowData.connections,
+      settings,
+      pinData,
+    };
+    // Preserve versionId and staticData so the internal API doesn't reset them
+    if (workflowData.versionId) payload.versionId = workflowData.versionId;
+    if (workflowData.staticData) payload.staticData = workflowData.staticData;
+
+    // Attempt 1: public /api/v1/ endpoint
+    const pubResponse = await fetch(`${this.apiUrl}/workflows/${workflowId}`, {
+      body: JSON.stringify(payload),
+      headers: this.headers,
+      method: 'PUT',
+    });
+
+    if (pubResponse.ok) return;
+
+    const pubErr = await pubResponse.text();
+
+    // Attempt 2: internal /rest/ endpoint (used by n8n UI; accepts pinData)
+    if (pubResponse.status === 400 && pubErr.includes('additional properties')) {
+      const restUrl = this.apiUrl.replace('/api/v1', '/rest');
+      const restResponse = await fetch(`${restUrl}/workflows/${workflowId}`, {
+        body: JSON.stringify(payload),
+        headers: this.headers,
+        method: 'PUT',
+      });
+      if (restResponse.ok) return;
+      const restErr = await restResponse.text();
+      throw new Error(`set pin data failed: ${restResponse.status} - ${restErr}`);
+    }
+
+    if (pubResponse.status === 403) {
+      throw new Error(
+        `set pin data failed (403 Forbidden). Ensure your API key has permission to update this workflow. n8n says: ${pubErr}`
+      );
+    }
+    if (pubResponse.status === 401) {
+      throw new Error(`set pin data failed (401 Unauthorized). Run: n8m config --n8n-key <your-key>`);
+    }
+    throw new Error(`set pin data failed: ${pubResponse.status} - ${pubErr}`);
   }
 
   /**

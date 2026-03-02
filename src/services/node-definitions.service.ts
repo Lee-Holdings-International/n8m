@@ -38,7 +38,6 @@ export class NodeDefinitionsService {
     async loadDefinitions(): Promise<void> {
         if (this.definitions.length > 0) return;
         
-        console.log('Loading node definitions...');
         try {
             // Re-initialize client if env vars changed (e.g. after config load)
             const config = await ConfigManager.load();
@@ -48,17 +47,13 @@ export class NodeDefinitionsService {
             if (apiUrl && apiKey) {
                 this.client = new N8nClient({ apiUrl, apiKey });
             }
-            
+
             this.definitions = await this.client.getNodeTypes();
-            
+
             if (this.definitions.length === 0) {
-                console.warn("No node definitions returned from n8n instance. Attempting fallback...");
                 this.loadFallback();
-            } else {
-                console.log(`Loaded ${this.definitions.length} node definitions.`);
             }
         } catch {
-            console.error("Failed to load node definitions from n8n instance (fetch failed).");
             this.loadFallback();
         }
     }
@@ -82,13 +77,10 @@ export class NodeDefinitionsService {
             if (fallbackPath) {
                 const fallbackData = fs.readFileSync(fallbackPath, 'utf8');
                 this.definitions = JSON.parse(fallbackData);
-                console.log(`Loaded ${this.definitions.length} node definitions (from fallback at ${path.basename(path.dirname(fallbackPath))}).`);
             } else {
-                console.warn("Fallback node definitions file not found in searched locations.");
                 this.definitions = [];
             }
-        } catch (fallbackError) {
-            console.error("Failed to load fallback node definitions:", fallbackError);
+        } catch {
             this.definitions = [];
         }
     }

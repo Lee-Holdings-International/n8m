@@ -3,6 +3,7 @@ import { TeamState } from "../state.js";
 import { ConfigManager } from "../../utils/config.js";
 import { N8nClient } from "../../utils/n8nClient.js";
 import { theme } from "../../utils/theme.js";
+import { Spinner } from "../../utils/spinner.js";
 
 export const qaNode = async (state: typeof TeamState.State) => {
   const aiService = AIService.getInstance();
@@ -47,10 +48,12 @@ export const qaNode = async (state: typeof TeamState.State) => {
     // a workflow that references credentials that don't exist on the instance.
     // Structural validation can still run; only live execution of credentialed
     // nodes will be skipped/fail, which is expected for an ephemeral test.
-    const strippedNodes = (targetWorkflow.nodes as any[]).map((node: any) => {
-      const { credentials: _creds, ...rest } = node;
-      return rest;
-    });
+    const strippedNodes = (targetWorkflow.nodes as any[])
+      .filter((node: any) => node != null)
+      .map((node: any) => {
+        const { credentials: _creds, ...rest } = node;
+        return rest;
+      });
 
     const rootPayload = {
       nodes: strippedNodes,
@@ -75,7 +78,6 @@ export const qaNode = async (state: typeof TeamState.State) => {
     }
 
     // 3. Deploy Ephemeral Workflow
-    console.log(theme.agent(`Deploying ephemeral root: ${rootPayload.name}...`));
     const result = await client.createWorkflow(rootPayload.name, rootPayload);
     createdWorkflowId = result.id;
 
@@ -97,13 +99,27 @@ export const qaNode = async (state: typeof TeamState.State) => {
     if (webhookNode) {
         const path = webhookNode.parameters?.path;
         if (path) {
-            // Activate for webhook testing
-            await client.activateWorkflow(createdWorkflowId);
+            // Activate for webhook testing — n8n validates the workflow at this point
+            try {
+                await client.activateWorkflow(createdWorkflowId);
+            } catch (activateErr: any) {
+                const raw: string = activateErr.message || String(activateErr);
+                // Try to extract a clean message from a JSON error body
+                let reason = raw;
+                const jsonMatch = raw.match(/\{.*\}/s);
+                if (jsonMatch) {
+                    try { reason = JSON.parse(jsonMatch[0]).message ?? raw; } catch { /* keep raw */ }
+                }
+                const msg = `Activation rejected by n8n: ${reason}`;
+                validationErrors.push(msg);
+                console.log(theme.fail(msg));
+                return { validationStatus: 'failed', validationErrors };
+            }
             const baseUrl = new URL(n8nUrl).origin;
             const webhookUrl = `${baseUrl}/webhook/${path}`;
 
             for (const scenario of scenarios) {
-                console.log(theme.info(`🧪 Running Scenario: ${theme.value(scenario.name)}...`));
+                console.log(theme.agent(`Testing: ${scenario.name}`));
                 const response = await fetch(webhookUrl, {
                     method: 'POST', 
                     headers: { 'Content-Type': 'application/json' },
@@ -118,8 +134,9 @@ export const qaNode = async (state: typeof TeamState.State) => {
                 // 5. Verify Execution for this scenario
                 const executionStartTime = Date.now();
                 let executionFound = false;
-                const maxPoll = 15; 
-                
+                const maxPoll = 15;
+
+                Spinner.start('Waiting for execution result');
                 for (let i = 0; i < maxPoll; i++) {
                     await new Promise(r => setTimeout(r, 2000));
                     const executions = await client.getWorkflowExecutions(createdWorkflowId);
@@ -128,21 +145,37 @@ export const qaNode = async (state: typeof TeamState.State) => {
                     if (recentExec) {
                         executionFound = true;
                         const fullExec = await client.getExecution(recentExec.id) as any;
-                        
+                        Spinner.stop();
+
                         if (fullExec.status === 'success') {
-                            console.log(theme.success(`   ✔ Passed`));
+                            console.log(theme.done('Passed'));
                         } else {
-                            const errorMsg = fullExec.data?.resultData?.error?.message || "Unknown flow failure";
+                            let errorMsg: string = fullExec.data?.resultData?.error?.message;
+                            if (!errorMsg) {
+                                const runData = fullExec.data?.resultData?.runData as Record<string, any[]> | undefined;
+                                if (runData) {
+                                    outer: for (const [, nodeRuns] of Object.entries(runData)) {
+                                        for (const run of nodeRuns) {
+                                            if (run?.error?.message) {
+                                                errorMsg = run.error.message;
+                                                break outer;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            errorMsg = errorMsg || 'Unknown flow failure';
                             validationErrors.push(`Scenario "${scenario.name}" Failed: ${errorMsg}`);
-                            console.log(theme.error(`   ✘ Failed: ${errorMsg}`));
+                            console.log(theme.fail(`Failed: ${errorMsg}`));
                         }
                         break;
                     }
                 }
-                
+
                 if (!executionFound) {
+                    Spinner.stop();
                     validationErrors.push(`Scenario "${scenario.name}": No execution detected after trigger.`);
-                    console.log(theme.warn(`   ⚠ No execution detected.`));
+                    console.log(theme.warn('No execution detected after trigger.'));
                 }
             }
         }
@@ -169,15 +202,17 @@ export const qaNode = async (state: typeof TeamState.State) => {
 
   } catch (error) {
     const errorMsg = (error as Error).message;
-    console.error(theme.error(`QA Node Error: ${errorMsg}`));
+    // Connectivity errors can't be fixed by modifying the workflow — rethrow so
+    // the graph surfaces a clear failure instead of looping through the engineer.
+    const isConnectivityError = errorMsg.includes('Cannot connect to n8n') ||
+                                errorMsg.includes('fetch failed') ||
+                                errorMsg.includes('ECONNREFUSED') ||
+                                errorMsg.includes('ENOTFOUND');
+    if (isConnectivityError) throw error;
     validationErrors.push(errorMsg);
   } finally {
-      // Cleanup
       if (createdWorkflowId) {
-          try {
-              await client.deleteWorkflow(createdWorkflowId);
-              console.log(theme.info(`Purged temporary workflow ${createdWorkflowId}`));
-          } catch { /* intentionally empty */ }
+          try { await client.deleteWorkflow(createdWorkflowId); } catch { /* intentionally empty */ }
       }
   }
 

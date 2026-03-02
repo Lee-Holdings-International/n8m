@@ -32,12 +32,16 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
       "cheerioHtml", "n8n-nodes-base.cheerioHtml"
   ];
 
-  nodes.forEach(node => {
+  nodes.filter(Boolean).forEach(node => {
+      if (!node.type) {
+          validationErrors.push(`A node is missing a "type" property — AI may have generated an incomplete node.`);
+          return;
+      }
+
       if (knownHallucinations.includes(node.type)) {
-          console.log(theme.warn(`[Reviewer] Detected hallucinated node type: ${node.type}`));
           validationErrors.push(`Hallucinated node type detected: "${node.type}". Use standard n8n-nodes-base types.`);
       }
-      
+
       // Check for empty names
       if (!node.name || node.name.trim() === "") {
           validationErrors.push(`Node with type "${node.type}" has an empty name.`);
@@ -48,7 +52,6 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
           if (!state.availableNodeTypes.includes(node.type)) {
                // Double check it's not a known exception or recent core node
                if (!node.type.startsWith('n8n-nodes-base.stick')) { // generic bypass for sticky notes etc if needed
-                   console.log(theme.warn(`[Reviewer] Node type not found in instance: ${node.type}`));
                    validationErrors.push(`Node type "${node.type}" is not available on your n8n instance.`);
                }
           }
@@ -59,6 +62,10 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
   // Build adjacency list (which nodes are destinations?)
   const destinations = new Set<string>();
   const connections = targetWorkflow.connections || {};
+  // Nodes that appear as keys in connections have at least one outgoing connection.
+  // Sub-nodes (AI models, tools, etc.) connect TO their parent this way — they should
+  // never be treated as orphans even though nothing connects back to them.
+  const sources = new Set<string>(Object.keys(connections));
   
   for (const sourceNode in connections) {
       const outputConfig = connections[sourceNode];
@@ -87,16 +94,13 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
              lower.includes('n8n-nodes-base.poll');
   };
 
+  const orphanedNodes: any[] = [];
   nodes.forEach(node => {
       // 2.1 Orphan Check
-      if (!destinations.has(node.name) && !isTrigger(node.type)) {
-           // It's an orphan unless it's a known trigger-like node
-           // Sticky notes and Merge nodes can be tricky, but generally Merge needs input.
-           if (!node.type.includes('StickyNote')) {
-                // Double check for "On Execution" (custom trigger name sometimes used)
+      if (!destinations.has(node.name) && !sources.has(node.name) && !isTrigger(node.type)) {
+           if (!node.type?.includes('StickyNote')) {
                 if (!node.name || (!node.name.toLowerCase().includes('trigger') && !node.name.toLowerCase().includes('webhook'))) {
-                     console.log(theme.warn(`[Reviewer] Validated disconnection: Node "${node.name || 'Unnamed'}" has no incoming connections.`));
-                     validationErrors.push(`Node "${node.name || 'Unnamed'}" (${node.type || 'unknown type'}) is disconnected (orphaned). Connect it or remove it.`);
+                     orphanedNodes.push(node);
                 }
            }
       }
@@ -111,7 +115,63 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
           }
       }
   });
-  
+
+  // 2.3 Auto-Shim: Attempt to chain orphaned nodes rather than failing
+  let shimmedWorkflow: any = null;
+  if (orphanedNodes.length > 0) {
+      const triggerNodes = nodes.filter(n => isTrigger(n.type));
+      const actionableOrphans = orphanedNodes.filter(n => !n.type?.includes('StickyNote'));
+
+      // Sort orphans by x position (left-to-right layout order)
+      const sorted = [...actionableOrphans].sort((a, b) => (a.position?.[0] ?? 0) - (b.position?.[0] ?? 0));
+
+      // Build a patched connections object
+      const patchedConnections = { ...(targetWorkflow.connections || {}) };
+
+      // Find the last node in the existing chain (a source node whose targets don't include any orphan)
+      // Simplification: if there's a trigger with no outgoing connections, attach the first orphan to it
+      let attachToName: string | null = null;
+      if (triggerNodes.length > 0) {
+          const trigger = triggerNodes[0];
+          if (!patchedConnections[trigger.name]) {
+              attachToName = trigger.name;
+          } else {
+              // Trigger already connects to something — find the tail of its chain
+              // Walk the chain and stop at the first node with no outgoing connection
+              let current = trigger.name;
+              for (let depth = 0; depth < 20; depth++) {
+                  const outgoing = patchedConnections[current];
+                  if (!outgoing?.main?.[0]?.[0]?.node) break;
+                  const next = outgoing.main[0][0].node;
+                  if (orphanedNodes.some(o => o.name === next)) break; // avoid infinite loop into orphans
+                  current = next;
+              }
+              attachToName = current;
+          }
+      }
+
+      if (attachToName && sorted.length > 0) {
+          // Attach first orphan to the chain tail
+          patchedConnections[attachToName] = {
+              main: [[{ node: sorted[0].name, type: 'main', index: 0 }]]
+          };
+          // Chain remaining orphans linearly
+          for (let i = 0; i < sorted.length - 1; i++) {
+              patchedConnections[sorted[i].name] = {
+                  main: [[{ node: sorted[i + 1].name, type: 'main', index: 0 }]]
+              };
+          }
+          console.log(theme.done(`Auto-connected ${sorted.length} orphaned node(s).`));
+          shimmedWorkflow = { ...targetWorkflow, connections: patchedConnections };
+          // Don't push these to validationErrors — we fixed them
+      } else {
+          // Can't determine where to attach — escalate to engineer
+          for (const node of actionableOrphans) {
+              validationErrors.push(`Node "${node.name || 'Unnamed'}" (${node.type || 'unknown type'}) is disconnected (orphaned). Connect it or remove it.`);
+          }
+      }
+  }
+
   // 3. Credentials Check
   // If we see an OpenAI node, warn if no credential ID is placeholder? (Skip for now)
 
@@ -122,10 +182,10 @@ export const reviewerNode = async (state: typeof TeamState.State) => {
       };
   }
 
-  // console.log(theme.success("Reviewer passed the blueprint."));
+  // Return the shimmed workflow if we auto-fixed orphaned nodes
   return {
       validationStatus: 'passed',
-      // Clear errors from previous runs
-      validationErrors: [] 
+      validationErrors: [],
+      ...(shimmedWorkflow ? { workflowJson: shimmedWorkflow } : {}),
   };
 };

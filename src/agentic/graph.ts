@@ -79,8 +79,6 @@ export const graph = workflow.compile({
  * @returns The final state of the graph
  */
 export const runAgenticWorkflow = async (goal: string, initialState: Partial<typeof TeamState.State> = {}, threadId: string = "default_session") => {
-  console.log(`🚀 Starting Agentic Workflow for goal: "${goal}" (Thread: ${threadId})`);
-  
   const result = await graph.invoke({
     userGoal: goal,
     messages: [], 
@@ -114,7 +112,6 @@ export const runAgenticWorkflowStream = async (goal: string, threadId: string = 
  * Resume the Agentic Workflow from an interrupted state
  */
 export const resumeAgenticWorkflow = async (threadId: string, input?: any) => {
-  console.log(`▶️ Resuming Agentic Workflow (Thread: ${threadId})`);
   return await graph.invoke(input, {
     configurable: { thread_id: threadId }
   });

@@ -5,6 +5,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { jsonrepair } from 'jsonrepair';
 import { NodeDefinitionsService } from './node-definitions.service.js';
+import { Spinner } from '../utils/spinner.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -155,33 +156,34 @@ export class AIService {
     const maxRetries = 3;
     let lastError: any;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        if (process.stdout.isTTY && process.env.NODE_ENV !== 'test') {
-          process.stdout.write(`   (AI Thinking: ${model})\n`);
-        }
+    Spinner.start('Thinking');
+    try {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          if (provider === 'anthropic' && !this.baseURL?.includes('openai') && !(this as any).client) {
+            return await this.callAnthropicNative(prompt, model, options);
+          }
 
-        if (provider === 'anthropic' && !this.baseURL?.includes('openai') && !(this as any).client) {
-          return await this.callAnthropicNative(prompt, model, options);
-        }
+          const client = this.getClient(provider);
 
-        const client = this.getClient(provider);
+          const completion = await client.chat.completions.create({
+            model,
+            messages: [{ role: 'user', content: prompt }],
+            temperature: options.temperature ?? 0.7,
+          });
 
-        const completion = await client.chat.completions.create({
-          model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: options.temperature ?? 0.7,
-        });
-
-        const result = completion as any;
-        return result.choices?.[0]?.message?.content || '';
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxRetries) {
-          const waitTime = Math.pow(2, attempt) * 1000;
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          const result = completion as any;
+          return result.choices?.[0]?.message?.content || '';
+        } catch (error) {
+          lastError = error;
+          if (attempt < maxRetries) {
+            const waitTime = Math.pow(2, attempt) * 1000;
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
         }
       }
+    } finally {
+      Spinner.stop();
     }
 
     throw lastError;

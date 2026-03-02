@@ -1,0 +1,42 @@
+{
+  "_comment": "Pre-defined test payloads for specific n8n workflows. Keys are workflow IDs or name substrings. The 'payload' object is POST-ed to the webhook as-is (n8n wraps it automatically: POST {content:'x'} → $json.body.content = 'x'). Place a copy of this file at ./workflow-test-fixtures.json or ./workflows/test-fixtures.json in your project to override bundled fixtures.",
+
+  "IAHbfTdmlTZfIDld": {
+    "_name": "Social Posting Flow I - Candidates",
+    "payload": {
+      "content": "Excited to share some thoughts on AI-powered workflow automation and how it's transforming the way teams operate. The future of work is here, and it's more efficient than ever. #AI #Automation #Productivity",
+      "title": "AI Workflow Automation",
+      "platform": "linkedin",
+      "author": "n8m Test Suite",
+      "tags": ["AI", "Automation", "n8n"]
+    }
+  },
+
+  "Social Posting Flow": {
+    "_note": "Name-based fallback — matches any workflow whose name contains 'Social Posting Flow'.",
+    "payload": {
+      "content": "Excited to share some thoughts on AI-powered workflow automation and how it's transforming the way teams operate. #AI #Automation",
+      "title": "AI Workflow Automation",
+      "platform": "linkedin",
+      "author": "n8m Test Suite"
+    }
+  },
+
+  "_example_slack_workflow": {
+    "_note": "Rename this key to your workflow ID or name substring to activate.",
+    "payload": {
+      "message": "Hello from n8m test suite",
+      "channel": "#general",
+      "username": "n8m Bot"
+    }
+  },
+
+  "_example_email_workflow": {
+    "_note": "Rename this key to your workflow ID or name substring to activate.",
+    "payload": {
+      "to": "test@example.com",
+      "subject": "n8m Test Email",
+      "body": "This is a test email sent by the n8m validation suite."
+    }
+  }
+}

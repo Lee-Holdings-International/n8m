@@ -8,31 +8,14 @@ export const architectNode = async (state: typeof TeamState.State) => {
     throw new Error("User goal is missing from state.");
   }
 
-  // Pass-through if we already have a workflow (Repairs/Testing mode)
-  // BUT if we have a goal that implies modification, we should probably still generate a spec?
-  // For now, let's allow spec generation even if workflowJson exists, so the Engineer can use the spec + old workflow to make new one.
-  // The logic in Architect assumes "generateSpec" creates a NEW spec from scratch.
-  // We might need a "modifySpec" or just rely on the Engineer to interpret the goal + existing workflow.
-  
-  // If we skip the architect, we go straight to Engineer?
-  // The graph edges are: START -> architect -> engineer.
-  // If we return empty here, 'spec' is undefined in state.
-  // Engineer checks state.spec.
-  
-  // If we want to support modification, the Architect should probably analyze the request vs the current workflow.
-  // However, for the first MVP, if we return empty, the Engineer will run.
-  // Does Engineer handle "no spec" but "has workflowJson" + "userGoal"?
-  // Let's assume we want the Architect to generate a plan (Spec) for the modification.
-  
-  // So we REMOVE this early return, or condition it on "isRepair" vs "isModify".
-  // Since we don't have an explicit flag, we can just let it run.
-  // The prompt for generateSpec might need to know about the existing workflow?
-  // Currently generateSpec only sees the goal.
-  
-  // Let's comment it out for now to allow Architect to run.
-  // if (state.workflowJson) {
-  //     return {};
-  // }
+  // Validation / repair mode: an existing workflow was supplied.
+  // Skip spec generation entirely — the engineer and reviewer operate directly
+  // on the existing workflowJson.  Generating a brand-new spec here causes the
+  // parallel engineers (via Send) to rebuild the workflow from scratch, which
+  // produces very large JSON that is error-prone and throws away the user's work.
+  if (state.workflowJson) {
+    return {};
+  }
 
   try {
     const spec = await aiService.generateSpec(state.userGoal);
@@ -61,7 +44,6 @@ export const architectNode = async (state: typeof TeamState.State) => {
     ];
 
     const logEntry = `Architect: Generated 2 strategies — "${strategies[0].suggestedName}" (primary) and "${strategies[1].suggestedName}" (alternative)`;
-    console.log(`[Architect] ${logEntry}`);
 
     return {
       spec,

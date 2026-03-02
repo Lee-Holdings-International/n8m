@@ -1,0 +1,188 @@
+{
+  "_comment": "Maps n8n node types + parameter names to test data hints. Used by testRemoteWorkflowDirectly() to build better mock payloads and self-healing prompts.",
+
+  "n8n-nodes-base.slack": {
+    "_description": "Slack node. blocksUi must be a valid JSON array of Block Kit blocks — never a plain string.",
+    "blocksUi": {
+      "type": "jsonArray",
+      "description": "Must be a JSON array of Block Kit block objects. If a webhook body field is used here, that field must contain valid blocks JSON, not plain text.",
+      "sample": "[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"Hello from n8m test\"}}]",
+      "errorSignal": "could not be parsed"
+    },
+    "attachments": {
+      "type": "jsonArray",
+      "description": "Legacy Slack attachments array.",
+      "sample": "[{\"fallback\":\"Test alert\",\"color\":\"#36a64f\",\"text\":\"Test attachment body\"}]"
+    },
+    "text": {
+      "type": "string",
+      "description": "Plain mrkdwn message text. Can use any string value.",
+      "sample": "Test message from n8m validation suite"
+    },
+    "channel": {
+      "type": "string",
+      "description": "Channel name (#general) or ID (C1234567890).",
+      "sample": "#general"
+    }
+  },
+
+  "n8n-nodes-base.slackTrigger": {
+    "_description": "Slack trigger — receives webhook events. No test payload hints needed."
+  },
+
+  "n8n-nodes-base.httpRequest": {
+    "_description": "HTTP Request node. body must match the expected content type.",
+    "body": {
+      "type": "json",
+      "description": "Request body as JSON. The structure depends on the target API.",
+      "sample": "{\"key\": \"value\"}"
+    },
+    "url": {
+      "type": "string",
+      "description": "Full URL including protocol.",
+      "sample": "https://httpbin.org/post"
+    }
+  },
+
+  "n8n-nodes-base.openAi": {
+    "_description": "OpenAI node. prompt/userMessage must be a non-empty string.",
+    "prompt": {
+      "type": "string",
+      "description": "The prompt to send. Must be a non-empty string.",
+      "sample": "Summarize this in one sentence: Hello world."
+    },
+    "userMessage": {
+      "type": "string",
+      "description": "User message for chat completions. Must be a non-empty string.",
+      "sample": "Write a short test post about productivity."
+    }
+  },
+
+  "n8n-nodes-base.googleSheets": {
+    "_description": "Google Sheets node.",
+    "sheetId": {
+      "type": "string",
+      "description": "Spreadsheet ID from the sheet URL.",
+      "sample": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+    }
+  },
+
+  "n8n-nodes-base.twitter": {
+    "_description": "Twitter/X node. text must be ≤280 chars.",
+    "text": {
+      "type": "string",
+      "description": "Tweet text. Max 280 characters.",
+      "sample": "Test post from n8m validation suite. #test"
+    }
+  },
+
+  "n8n-nodes-base.linkedIn": {
+    "_description": "LinkedIn node. text/commentary must be a non-empty string.",
+    "text": {
+      "type": "string",
+      "description": "Post body text.",
+      "sample": "Sharing insights on productivity. This is a test post from n8m."
+    }
+  },
+
+  "n8n-nodes-base.telegram": {
+    "_description": "Telegram node. text must be a non-empty string.",
+    "text": {
+      "type": "string",
+      "description": "Message text. Supports HTML/Markdown depending on parseMode.",
+      "sample": "Test message from n8m validation suite."
+    }
+  },
+
+  "n8n-nodes-base.discord": {
+    "_description": "Discord node. text must be a non-empty string, max 2000 chars.",
+    "text": {
+      "type": "string",
+      "description": "Message content. Max 2000 characters.",
+      "sample": "Test message from n8m validation suite."
+    }
+  },
+
+  "n8n-nodes-base.gmail": {
+    "_description": "Gmail node.",
+    "subject": {
+      "type": "string",
+      "description": "Email subject line.",
+      "sample": "n8m Test Email"
+    },
+    "message": {
+      "type": "string",
+      "description": "Email body. HTML or plain text.",
+      "sample": "This is a test email sent by the n8m validation suite."
+    },
+    "toList": {
+      "type": "string",
+      "description": "Recipient email address(es), comma-separated.",
+      "sample": "test@example.com"
+    }
+  },
+
+  "n8n-nodes-base.sendEmail": {
+    "_description": "Send Email node (SMTP).",
+    "subject": {
+      "type": "string",
+      "sample": "n8m Test Email"
+    },
+    "text": {
+      "type": "string",
+      "sample": "Test email body from n8m validation."
+    },
+    "toEmail": {
+      "type": "string",
+      "sample": "test@example.com"
+    }
+  },
+
+  "n8n-nodes-base.notion": {
+    "_description": "Notion node. pageId must be a valid UUID.",
+    "pageId": {
+      "type": "string",
+      "description": "Notion page ID (UUID format).",
+      "sample": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    }
+  },
+
+  "n8n-nodes-base.airtable": {
+    "_description": "Airtable node.",
+    "table": {
+      "type": "string",
+      "description": "Table name exactly as it appears in Airtable.",
+      "sample": "Table 1"
+    }
+  },
+
+  "n8n-nodes-base.html": {
+    "_description": "HTML node. Generates HTML from a template expression. The 'html' parameter must be a valid HTML string or expression producing one.",
+    "html": {
+      "type": "string",
+      "description": "HTML template string. Uses $json fields from the previous node. If this node accesses $json.body.content, the webhook payload must include 'content' as a plain text string.",
+      "sample": "<h1>Test Heading</h1><p>Test paragraph content.</p>"
+    }
+  },
+
+  "n8n-nodes-base.markdown": {
+    "_description": "Markdown node. Converts markdown text to HTML. The markdown field must be a string.",
+    "markdown": {
+      "type": "string",
+      "description": "Markdown text to convert.",
+      "sample": "# Test Heading\n\nTest paragraph content."
+    }
+  },
+
+  "n8n-nodes-base.set": {
+    "_description": "Set node. No special payload requirements — reads from upstream data."
+  },
+
+  "n8n-nodes-base.if": {
+    "_description": "IF node. No special payload requirements — evaluates conditions on upstream data."
+  },
+
+  "n8n-nodes-base.code": {
+    "_description": "Code node. No special payload requirements — runs JS/TS against upstream data."
+  }
+}

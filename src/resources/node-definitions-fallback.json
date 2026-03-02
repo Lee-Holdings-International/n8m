@@ -56,7 +56,7 @@
   {
     "name": "n8n-nodes-base.slack",
     "displayName": "Slack",
-    "description": "Interact with Slack",
+    "description": "Send messages, manage channels, users, files, and reactions in Slack",
     "properties": [
       {
         "name": "resource",
@@ -64,8 +64,13 @@
         "type": "options",
         "default": "message",
         "options": [
-          { "name": "Message", "value": "message" },
-          { "name": "Channel", "value": "channel" }
+          { "name": "Message",   "value": "message" },
+          { "name": "Channel",   "value": "channel" },
+          { "name": "File",      "value": "file" },
+          { "name": "Reaction",  "value": "reaction" },
+          { "name": "Star",      "value": "star" },
+          { "name": "User",      "value": "user" },
+          { "name": "User Group","value": "userGroup" }
         ]
       },
       {
@@ -73,22 +78,194 @@
         "displayName": "Operation",
         "type": "options",
         "default": "post",
+        "description": "Resource=message: delete|get|getAll|post|update|search. Resource=channel: archive|create|get|getAll|history|invite|join|kick|leave|open|rename|replies|setPurpose|setTopic|unarchive. Resource=file: get|getAll|upload. Resource=reaction: add|get|remove. Resource=user: get|getAll|getPresence",
         "options": [
-          { "name": "Post", "value": "post" },
-          { "name": "Update", "value": "update" }
+          { "name": "Add",        "value": "add" },
+          { "name": "Archive",    "value": "archive" },
+          { "name": "Create",     "value": "create" },
+          { "name": "Delete",     "value": "delete" },
+          { "name": "Get",        "value": "get" },
+          { "name": "Get Many",   "value": "getAll" },
+          { "name": "Get Presence","value": "getPresence" },
+          { "name": "History",    "value": "history" },
+          { "name": "Invite",     "value": "invite" },
+          { "name": "Join",       "value": "join" },
+          { "name": "Kick",       "value": "kick" },
+          { "name": "Leave",      "value": "leave" },
+          { "name": "Open",       "value": "open" },
+          { "name": "Post",       "value": "post" },
+          { "name": "Remove",     "value": "remove" },
+          { "name": "Rename",     "value": "rename" },
+          { "name": "Replies",    "value": "replies" },
+          { "name": "Search",     "value": "search" },
+          { "name": "Set Purpose","value": "setPurpose" },
+          { "name": "Set Topic",  "value": "setTopic" },
+          { "name": "Unarchive",  "value": "unarchive" },
+          { "name": "Update",     "value": "update" },
+          { "name": "Upload",     "value": "upload" }
         ]
       },
       {
         "name": "channel",
         "displayName": "Channel",
         "type": "string",
-        "default": ""
+        "default": "",
+        "description": "Channel name (e.g. #general) or ID (e.g. C1234567890)"
       },
       {
         "name": "text",
-        "displayName": "Text",
+        "displayName": "Message Text",
         "type": "string",
-        "default": ""
+        "default": "",
+        "description": "Plain text fallback. Required when blocks/attachments are absent. Supports mrkdwn when mrkdwn option is enabled."
+      },
+      {
+        "name": "blocksUi",
+        "displayName": "Blocks",
+        "type": "json",
+        "default": "",
+        "description": "Block Kit blocks as a JSON array string. MUST be a valid JSON array. n8n parses this at runtime — if the expression produces invalid JSON the node throws 'Parameter blocksUi could not be parsed'. ALWAYS wrap expressions inside string values, never at the array level. Example: [{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"={{ $json.body.content }}\"}}]. When using expressions, ensure the referenced value exists and is a string. Supported block types: section, header, divider, image, actions, context, input, file, video."
+      },
+      {
+        "name": "attachments",
+        "displayName": "Attachments",
+        "type": "json",
+        "default": "[]",
+        "description": "Legacy Slack attachments as a JSON array. Prefer blocks (blocksUi) for new workflows. Example: [{\"fallback\":\"Alert\",\"color\":\"#36a64f\",\"title\":\"Title\",\"text\":\"Body\",\"fields\":[{\"title\":\"Field\",\"value\":\"Value\",\"short\":true}]}]"
+      },
+      {
+        "name": "otherOptions",
+        "displayName": "Other Options",
+        "type": "collection",
+        "default": {},
+        "description": "Additional message options",
+        "options": [
+          {
+            "name": "thread_ts",
+            "displayName": "Thread Timestamp",
+            "type": "string",
+            "default": "",
+            "description": "Timestamp of parent message to reply in a thread. Get from $json.ts on a previous Slack message."
+          },
+          {
+            "name": "reply_broadcast",
+            "displayName": "Reply Broadcast",
+            "type": "boolean",
+            "default": false,
+            "description": "When true, also post the thread reply to the channel (visible outside thread)."
+          },
+          {
+            "name": "mrkdwn",
+            "displayName": "Markdown",
+            "type": "boolean",
+            "default": false,
+            "description": "Enable mrkdwn formatting in the text field."
+          },
+          {
+            "name": "unfurl_links",
+            "displayName": "Unfurl Links",
+            "type": "boolean",
+            "default": false
+          },
+          {
+            "name": "unfurl_media",
+            "displayName": "Unfurl Media",
+            "type": "boolean",
+            "default": true
+          },
+          {
+            "name": "username",
+            "displayName": "Bot Username",
+            "type": "string",
+            "default": "",
+            "description": "Override the bot's display name for this message."
+          },
+          {
+            "name": "icon_emoji",
+            "displayName": "Icon Emoji",
+            "type": "string",
+            "default": "",
+            "description": "Override the bot icon with an emoji, e.g. :robot_face:"
+          },
+          {
+            "name": "icon_url",
+            "displayName": "Icon URL",
+            "type": "string",
+            "default": "",
+            "description": "Override the bot icon with a remote image URL."
+          },
+          {
+            "name": "link_names",
+            "displayName": "Link Names",
+            "type": "boolean",
+            "default": false,
+            "description": "Find and linkify channel names and usernames."
+          }
+        ]
+      },
+      {
+        "name": "select",
+        "displayName": "User",
+        "type": "string",
+        "default": "",
+        "description": "User ID for user/reaction operations (e.g. U1234567890)"
+      },
+      {
+        "name": "timestamp",
+        "displayName": "Message Timestamp",
+        "type": "string",
+        "default": "",
+        "description": "The ts value of the message for get/update/delete/reaction operations."
+      },
+      {
+        "name": "messageId",
+        "displayName": "Message ID (ts)",
+        "type": "string",
+        "default": "",
+        "description": "Unique message timestamp used as ID (ts field from previous Slack response)."
+      },
+      {
+        "name": "fileContent",
+        "displayName": "File Content",
+        "type": "string",
+        "default": "",
+        "description": "Content of the file to upload (for file.upload operation)."
+      },
+      {
+        "name": "fileName",
+        "displayName": "File Name",
+        "type": "string",
+        "default": "",
+        "description": "Name of the file including extension (for file.upload)."
+      }
+    ]
+  },
+  {
+    "name": "n8n-nodes-base.slackTrigger",
+    "displayName": "Slack Trigger",
+    "description": "Receive events from Slack via webhooks or Socket Mode",
+    "properties": [
+      {
+        "name": "triggerOn",
+        "displayName": "Trigger On",
+        "type": "options",
+        "default": "message",
+        "options": [
+          { "name": "New Message Posted to Channel", "value": "message" },
+          { "name": "New Public Channel Created",    "value": "channelCreated" },
+          { "name": "New User Added",                "value": "teamJoin" },
+          { "name": "Reaction Added",                "value": "reactionAdded" },
+          { "name": "Reaction Removed",              "value": "reactionRemoved" },
+          { "name": "File Shared",                   "value": "fileShared" },
+          { "name": "App Mention",                   "value": "appMention" }
+        ]
+      },
+      {
+        "name": "channelId",
+        "displayName": "Channel to Watch",
+        "type": "string",
+        "default": "",
+        "description": "Channel ID to listen for events in. Leave empty to listen to all channels."
       }
     ]
   },

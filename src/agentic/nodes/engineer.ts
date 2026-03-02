@@ -2,6 +2,7 @@ import { AIService } from "../../services/ai.service.js";
 import { TeamState } from "../state.js";
 import { NodeDefinitionsService } from "../../services/node-definitions.service.js";
 import { jsonrepair } from "jsonrepair";
+import { theme } from "../../utils/theme.js";
 
 export const engineerNode = async (state: typeof TeamState.State) => {
   const aiService = AIService.getInstance();
@@ -21,13 +22,18 @@ export const engineerNode = async (state: typeof TeamState.State) => {
       ? `\n\n[N8N NODE REFERENCE GUIDE]\n${staticRef}\n\n[AVAILABLE NODE SCHEMAS - USE THESE EXACT PARAMETERS]\n${nodeService.formatForLLM(relevantDefs)}` 
       : "";
 
-  if (relevantDefs.length > 0) {
-      console.log(`[Engineer] RAG: Found ${relevantDefs.length} relevant node schemas.`);
-  }
-
   // Self-Correction Loop Check
   if (state.validationErrors && state.validationErrors.length > 0) {
-      console.log("🔧 Engineer is fixing the workflow based on QA feedback...");
+      const errCount = state.validationErrors.length;
+      console.log(theme.agent(`Repairing workflow (${errCount} issue${errCount === 1 ? '' : 's'})...`));
+      const MAX_SHOWN = 4;
+      state.validationErrors.slice(0, MAX_SHOWN).forEach(e => {
+          const truncated = e.length > 110 ? e.substring(0, 110) + '…' : e;
+          console.log(theme.muted(`  ↳ ${truncated}`));
+      });
+      if (errCount > MAX_SHOWN) {
+          console.log(theme.muted(`  ↳ +${errCount - MAX_SHOWN} more`));
+      }
       
       try {
           // We pass the entire list of errors as context
