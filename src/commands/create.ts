@@ -113,108 +113,154 @@ export default class Create extends Command {
                         this.log('');
                     });
                 }
-            } else if (nodeName === 'engineer') {
-               this.log(theme.agent(`⚙️  Engineer: Workflow code generated/updated.`));
-               if (stateUpdate.workflowJson) {
-                   lastWorkflowJson = stateUpdate.workflowJson;
-               }
-            } else if (nodeName === 'qa') {
-               const status = stateUpdate.validationStatus;
-               if (status === 'passed') {
-                   this.log(theme.success(`🧪 QA: Validation Passed!`));
-               } else {
-                   this.log(theme.fail(`🧪 QA: Validation Failed.`));
-                   if (stateUpdate.validationErrors && stateUpdate.validationErrors.length > 0) {
-                       stateUpdate.validationErrors.forEach((e: string) => this.log(theme.error(`   - ${e}`)));
-                   }
-                   this.log(theme.warn(`   Looping back to Engineer for repairs...`));
-               }
             }
         }
 
-        // Check for interrupt/pause
+        // Handle interrupt/pause loop
         let snapshot = await graph.getState({ configurable: { thread_id: threadId } });
         while (snapshot.next.length > 0) {
             const nextNode = snapshot.next[0];
-            this.log(theme.warn(`\n⏸️  Workflow Paused at step: ${nextNode}`));
-            
-            if (nextNode === 'engineer') {
-                const { action } = await inquirer.prompt([{
-                    type: 'list',
-                    name: 'action',
-                    message: 'How would you like to proceed with the Blueprint?',
-                    choices: [
-                        { name: 'Approve and Generate Workflow', value: 'approve' },
-                        { name: 'Provide Feedback / Refine Strategy', value: 'feedback' },
-                        { name: 'Exit and Resume Later', value: 'exit' }
-                    ]
-                }]);
 
-                if (action === 'approve') {
-                    this.log(theme.agent("Approve! Proceeding to engineering..."));
-                    await graph.updateState({ configurable: { thread_id: threadId } }, { userFeedback: undefined }, nextNode);
-                    const stream = await graph.stream(null, { configurable: { thread_id: threadId } });
-                    for await (const event of stream) {
-                         const nodeName = Object.keys(event)[0];
-                         const stateUpdate = (event as Record<string, any>)[nodeName];
-                         if (nodeName === 'engineer') {
-                            this.log(theme.agent(`⚙️  Engineer: Workflow code generated/updated.`));
-                            if (stateUpdate.workflowJson) lastWorkflowJson = stateUpdate.workflowJson;
-                         } else if (nodeName === 'qa') {
-                            const status = stateUpdate.validationStatus;
-                            if (status === 'passed') this.log(theme.success(`🧪 QA: Validation Passed!`));
-                            else this.log(theme.fail(`🧪 QA: Validation Failed.`));
-                         }
-                    }
-                } else if (action === 'feedback') {
-                    const { feedback } = await inquirer.prompt([{
-                        type: 'input',
-                        name: 'feedback',
-                        message: 'Enter your feedback/instructions:',
-                    }]);
-                    this.log(theme.agent("Updating strategy with your feedback..."));
-                    // In a real implementation, we'd loop back to Architect or update the goal.
-                    // For now, let's update userFeedback and resume. 
-                    // To actually RE-ARCHITECT, we might need to jump back.
-                    // LangGraph can handle this by updating state and using a conditional edge.
-                    await graph.updateState({ configurable: { thread_id: threadId } }, { userFeedback: feedback }, nextNode);
-                    // For now, just resume and let Engineer see the feedback.
-                    const stream = await graph.stream(null, { configurable: { thread_id: threadId } });
-                    for await (const event of stream) {
-                        const nodeName = Object.keys(event)[0];
-                        const stateUpdate = (event as Record<string, any>)[nodeName];
-                        if (nodeName === 'engineer') {
-                           this.log(theme.agent(`⚙️  Engineer: Workflow code generated/updated (Feedback incorporated).`));
-                           if (stateUpdate.workflowJson) lastWorkflowJson = stateUpdate.workflowJson;
-                        } else if (nodeName === 'qa') {
-                            if (stateUpdate.validationStatus === 'passed') this.log(theme.success(`🧪 QA: Validation Passed!`));
+            if (nextNode === 'engineer') {
+                const isRepair = (snapshot.values.validationErrors as string[] || []).length > 0;
+
+                if (isRepair) {
+                    // Repair iteration — auto-continue without asking the user
+                    const repairStream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                    for await (const event of repairStream) {
+                        const n = Object.keys(event)[0];
+                        const u = (event as Record<string, any>)[n];
+                        if (n === 'engineer') {
+                            this.log(theme.agent(`⚙️  Engineer: Applying fixes...`));
+                            if (u.workflowJson) lastWorkflowJson = u.workflowJson;
+                        } else if (n === 'supervisor' && u.workflowJson) {
+                            lastWorkflowJson = u.workflowJson;
                         }
                     }
                 } else {
-                    this.log(theme.info(`Session persisted. Resume later with: n8m resume ${threadId}`));
-                    return;
+                    // Initial build — let user choose which strategy to use
+                    const strategies = (snapshot.values.strategies as any[]) || [];
+                    const spec = snapshot.values.spec;
+
+                    const choices: any[] = [];
+                    if (strategies.length > 0) {
+                        strategies.forEach((s: any, i: number) => {
+                            const tag = i === 0 ? 'Primary' : 'Alternative';
+                            const nodes = (s.nodes as any[] | undefined)
+                                ?.map((n: any) => n.type?.split('.').pop())
+                                .join(', ');
+                            choices.push({
+                                name: `[${tag}] ${s.suggestedName}${nodes ? `  ·  ${nodes}` : ''}`,
+                                value: { type: 'build', strategy: s },
+                                short: s.suggestedName,
+                            });
+                        });
+                    } else if (spec) {
+                        choices.push({
+                            name: spec.suggestedName,
+                            value: { type: 'build', strategy: spec },
+                            short: spec.suggestedName,
+                        });
+                    }
+
+                    choices.push(new inquirer.Separator());
+                    choices.push({
+                        name: 'Add feedback before building',
+                        value: { type: 'feedback' },
+                        short: 'Add feedback',
+                    });
+                    choices.push({
+                        name: 'Exit (save session to resume later)',
+                        value: { type: 'exit' },
+                        short: 'Exit',
+                    });
+
+                    const { choice } = await inquirer.prompt([{
+                        type: 'list',
+                        name: 'choice',
+                        message: strategies.length > 1
+                            ? 'The Architect designed two approaches — which should the Engineer build?'
+                            : 'Blueprint ready. How would you like to proceed?',
+                        choices,
+                    }]);
+
+                    if (choice.type === 'exit') {
+                        this.log(theme.info(`\nSession saved. Resume later with: n8m resume ${threadId}`));
+                        return;
+                    }
+
+                    let chosenSpec = choice.strategy ?? spec;
+                    let stateUpdate: Record<string, any> = { spec: chosenSpec, userFeedback: undefined };
+
+                    if (choice.type === 'feedback') {
+                        const { feedback } = await inquirer.prompt([{
+                            type: 'input',
+                            name: 'feedback',
+                            message: 'Describe your refinements (the Engineer will incorporate them):',
+                        }]);
+                        chosenSpec = strategies[0] ?? spec;
+                        stateUpdate = { spec: chosenSpec, userFeedback: feedback };
+                        this.log(theme.agent(`Feedback noted. Building "${chosenSpec?.suggestedName}" with your refinements...`));
+                    } else {
+                        this.log(theme.agent(`Building "${chosenSpec?.suggestedName}"...`));
+                    }
+
+                    await graph.updateState({ configurable: { thread_id: threadId } }, stateUpdate, nextNode);
+
+                    const buildStream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                    for await (const event of buildStream) {
+                        const n = Object.keys(event)[0];
+                        const u = (event as Record<string, any>)[n];
+                        if (n === 'engineer') {
+                            this.log(theme.agent(`⚙️  Engineer: Building workflow...`));
+                            if (u.workflowJson) lastWorkflowJson = u.workflowJson;
+                        } else if (n === 'supervisor' && u.workflowJson) {
+                            lastWorkflowJson = u.workflowJson;
+                        } else if (n === 'reviewer' && u.validationStatus === 'failed') {
+                            this.log(theme.warn(`   Reviewer flagged issues — Engineer will revise...`));
+                        }
+                    }
                 }
-            } else {
-                // Handle other interrupts (like QA)
-                const { resume } = await inquirer.prompt([{
+
+            } else if (nextNode === 'qa') {
+                const { proceed } = await inquirer.prompt([{
                     type: 'confirm',
-                    name: 'resume',
-                    message: `Review completed for ${nextNode}. Resume workflow execution?`,
-                    default: true
+                    name: 'proceed',
+                    message: 'Workflow generated! Ready to run QA tests?',
+                    default: true,
                 }]);
 
-                if (resume) {
-                    this.log(theme.agent("Resuming..."));
-                    const result = await resumeAgenticWorkflow(threadId);
-                    if (result.validationStatus === 'passed') {
-                        this.log(theme.success(`🧪 QA (Resumed): Validation Passed!`));
-                        if (result.workflowJson) lastWorkflowJson = result.workflowJson;
-                    }
-                } else {
-                    this.log(theme.info(`Session persisted. Resume later with: n8m resume ${threadId}`));
+                if (!proceed) {
+                    this.log(theme.info(`\nSession saved. Resume later with: n8m resume ${threadId}`));
                     return;
                 }
+
+                const qaStream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                for await (const event of qaStream) {
+                    const n = Object.keys(event)[0];
+                    const u = (event as Record<string, any>)[n];
+                    if (n === 'qa') {
+                        if (u.validationStatus === 'passed') {
+                            this.log(theme.success(`🧪 QA: Validation Passed!`));
+                            if (u.workflowJson) lastWorkflowJson = u.workflowJson;
+                        } else {
+                            this.log(theme.fail(`🧪 QA: Validation Failed.`));
+                            if (u.validationErrors?.length) {
+                                (u.validationErrors as string[]).forEach(e => this.log(theme.error(`   - ${e}`)));
+                            }
+                            this.log(theme.warn(`   Looping back to Engineer for repairs...`));
+                        }
+                    } else if (n === 'supervisor' && u.workflowJson) {
+                        lastWorkflowJson = u.workflowJson;
+                    }
+                }
+
+            } else {
+                // Unknown interrupt — auto-resume
+                const result = await resumeAgenticWorkflow(threadId);
+                if (result.workflowJson) lastWorkflowJson = result.workflowJson;
             }
+
             snapshot = await graph.getState({ configurable: { thread_id: threadId } });
         }
 

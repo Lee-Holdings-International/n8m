@@ -1,4 +1,4 @@
-import { StateGraph, START, END, Send } from "@langchain/langgraph";
+import { StateGraph, START, END } from "@langchain/langgraph";
 import { checkpointer } from "./checkpointer.js";
 import { architectNode } from "./nodes/architect.js";
 import { engineerNode } from "./nodes/engineer.js";
@@ -18,14 +18,8 @@ const workflow = new StateGraph(TeamState)
   // Edges
   .addEdge(START, "architect")
   
-  // Parallel Fan-Out: Architect -> Multiple Engineers (via Send)
-  .addConditionalEdges("architect", (state) => {
-     if (state.strategies && state.strategies.length > 0) {
-         return state.strategies.map(s => new Send("engineer", { spec: s }));
-     }
-     // Fallback for linear path
-     return "engineer";
-  }, ["engineer"]) // We must declare valid destination nodes for visualization/compilation
+  // Architect -> Engineer (spec is chosen interactively in create.ts before resuming)
+  .addEdge("architect", "engineer")
   
   // Fan-In: Engineer -> Supervisor (Wait for all to finish) or route to Reviewer (if fixing)
   .addConditionalEdges("engineer", (state) => {
