@@ -205,7 +205,7 @@ export default class Create extends Command {
                         this.log(theme.agent(`Building "${chosenSpec?.suggestedName}"...`));
                     }
 
-                    await graph.updateState({ configurable: { thread_id: threadId } }, stateUpdate, nextNode);
+                    await graph.updateState({ configurable: { thread_id: threadId } }, stateUpdate);
 
                     const buildStream = await graph.stream(null, { configurable: { thread_id: threadId } });
                     for await (const event of buildStream) {
@@ -279,9 +279,11 @@ export default class Create extends Command {
 
     const docService = DocService.getInstance();
     for (const workflow of workflows) {
-        const projectTitle = await docService.generateProjectTitle(workflow);
-        workflow.name = projectTitle; // Standardize name
-        
+        // Use the workflow's own name (set by the Engineer from the spec's suggestedName).
+        // Only call generateProjectTitle as a fallback when the name is missing or generic.
+        const projectTitle = workflow.name || await docService.generateProjectTitle(workflow);
+        workflow.name = projectTitle;
+
         const slug = docService.generateSlug(projectTitle);
         const workflowsDir = path.join(process.cwd(), 'workflows');
         const targetDir = path.join(workflowsDir, slug);
