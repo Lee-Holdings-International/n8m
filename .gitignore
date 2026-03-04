@@ -14,6 +14,7 @@ oclif.manifest.json
 .gemini
 .vercel
 .agent
+.n8m
 
 # Debug logs
 npm-debug.log*

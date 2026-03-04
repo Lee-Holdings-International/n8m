@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://n8m.dev/fixture-schema.json",
+  "title": "WorkflowFixture",
+  "description": "n8m fixture file — captures a real n8n execution for offline testing and replay.",
+  "type": "object",
+  "required": ["version", "workflowId", "workflowName", "workflow", "execution"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for editor autocomplete."
+    },
+    "version": {
+      "const": "1.0",
+      "description": "Fixture format version. Always \"1.0\"."
+    },
+    "capturedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of when the fixture was captured."
+    },
+    "workflowId": {
+      "type": "string",
+      "description": "The n8n workflow ID this fixture was captured from."
+    },
+    "workflowName": {
+      "type": "string",
+      "description": "Human-readable workflow name."
+    },
+    "workflow": {
+      "type": "object",
+      "description": "Full n8n workflow JSON (nodes, connections, settings, etc.).",
+      "required": ["nodes", "connections"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["name", "type"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string", "description": "Unique node name within this workflow." },
+              "type": { "type": "string", "description": "e.g. n8n-nodes-base.code" },
+              "typeVersion": { "type": "number" },
+              "position": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+              "parameters": { "type": "object", "additionalProperties": true }
+            }
+          }
+        },
+        "connections": {
+          "type": "object",
+          "description": "Maps source node names to their output connections.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "main": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "node": { "type": "string" },
+                      "type": { "type": "string" },
+                      "index": { "type": "number" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "description": "The captured n8n execution result.",
+      "required": ["status", "data"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["success", "error", "crashed", "waiting", "running"],
+          "description": "Final execution status."
+        },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "data": {
+          "type": "object",
+          "required": ["resultData"],
+          "properties": {
+            "resultData": {
+              "type": "object",
+              "required": ["runData"],
+              "properties": {
+                "error": {
+                  "description": "Top-level execution error, if any. null on success.",
+                  "oneOf": [
+                    { "type": "null" },
+                    {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "message": { "type": "string" },
+                        "description": { "type": "string" },
+                        "node": {
+                          "description": "Name of the node that failed.",
+                          "oneOf": [
+                            { "type": "string" },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "name": { "type": "string" },
+                                "type": { "type": "string" }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                },
+                "runData": {
+                  "type": "object",
+                  "description": "Per-node output data. Keys are exact node names.",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "properties": {
+                        "json": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "The node's output JSON data."
+                        },
+                        "binary": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Binary field metadata, if any."
+                        },
+                        "error": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "description": "Node-level error, if this node failed."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

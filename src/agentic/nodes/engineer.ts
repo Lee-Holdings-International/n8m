@@ -24,8 +24,23 @@ export const engineerNode = async (state: typeof TeamState.State) => {
 
   // Self-Correction Loop Check
   if (state.validationErrors && state.validationErrors.length > 0) {
+      const currentRevision = (state.revisionCount || 0) + 1;
+      const maxRevisions = state.maxRevisions || 3;
+
+      if (currentRevision > maxRevisions) {
+          console.log(theme.fail(`Max self-healing revisions (${maxRevisions}) reached. Manual intervention required.`));
+          return {
+              revisionCount: currentRevision,
+              validationStatus: 'failed' as const,
+              validationErrors: [
+                  `Self-healing limit (${maxRevisions} revisions) exceeded. Remaining issues:`,
+                  ...state.validationErrors,
+              ],
+          };
+      }
+
       const errCount = state.validationErrors.length;
-      console.log(theme.agent(`Repairing workflow (${errCount} issue${errCount === 1 ? '' : 's'})...`));
+      console.log(theme.agent(`Repairing workflow — revision ${currentRevision}/${maxRevisions} (${errCount} issue${errCount === 1 ? '' : 's'})...`));
       const MAX_SHOWN = 4;
       state.validationErrors.slice(0, MAX_SHOWN).forEach(e => {
           const truncated = e.length > 110 ? e.substring(0, 110) + '…' : e;
@@ -34,11 +49,11 @@ export const engineerNode = async (state: typeof TeamState.State) => {
       if (errCount > MAX_SHOWN) {
           console.log(theme.muted(`  ↳ +${errCount - MAX_SHOWN} more`));
       }
-      
+
       try {
           // We pass the entire list of errors as context
           const errorContext = state.validationErrors.join('\n');
-          
+
           // Use the robust fix logic from AIService
           const fixedWorkflow = await aiService.generateWorkflowFix(
               state.workflowJson,
@@ -47,9 +62,10 @@ export const engineerNode = async (state: typeof TeamState.State) => {
               false,
               state.availableNodeTypes || []
           );
-          
+
           return {
               workflowJson: fixedWorkflow,
+              revisionCount: currentRevision,
               // validationErrors will be overwritten by next QA run
           };
       } catch (error) {

@@ -32,4 +32,8 @@ export const TeamState = Annotation.Root({
   }),
   userFeedback: Annotation<string>,
   testScenarios: Annotation<any[]>,
+  maxRevisions: Annotation<number>({
+    value: (_x, y) => y ?? 3,
+    default: () => 3,
+  }),
 });

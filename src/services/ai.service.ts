@@ -16,6 +16,14 @@ export interface GenerateOptions {
   temperature?: number;
 }
 
+export interface TestErrorEvaluation {
+  action: 'fix_node' | 'regenerate_payload' | 'structural_pass' | 'escalate';
+  nodeFixType?: 'code_node_js' | 'execute_command' | 'binary_field';
+  targetNodeName?: string;
+  suggestedBinaryField?: string;
+  reason: string;
+}
+
 export interface WorkflowSpec {
   suggestedName: string;
   description: string;
@@ -440,6 +448,75 @@ export class AIService {
       }
   }
 
+  async fixExecuteCommandScript(command: string, error?: string): Promise<string> {
+    const errorCtx = error ? `\nError from the failing command:\n${error}\n` : '';
+    const prompt = `You are a bash scripting expert.
+The following shell command is used in an n8n Execute Command node.
+It appears that newlines were accidentally stripped from the script, collapsing it to a single line.${errorCtx}
+Current (collapsed) command:
+\`\`\`
+${command}
+\`\`\`
+
+Reconstruct the properly-formatted multiline bash script. Rules:
+- Restore newlines between statements (variable assignments, commands, etc.)
+- Properly format line-continuation backslashes: each \\ must be followed by a real newline
+- Keep all original commands and logic intact — do not change what the script does
+- Use \\n to separate statements, not semicolons (unless they were originally there)
+
+Return ONLY the fixed shell script. No markdown fences, no explanation.`;
+
+    const response = await this.generateContent(prompt, { temperature: 0.1 });
+    return response.replace(/^```(?:bash|sh|shell)?\n?|\n?```$/g, '').trim();
+  }
+
+  async fixCodeNodeJavaScript(code: string, error: string): Promise<string> {
+    const prompt = `You are an n8n Code node JavaScript expert.
+The following code is used in an n8n Code node but fails with a syntax error.
+Error: ${error}
+
+Current code:
+\`\`\`javascript
+${code}
+\`\`\`
+
+Fix the JavaScript so it runs correctly in an n8n Code node. Rules:
+- All ES6+ syntax is valid (const, let, arrow functions, destructuring, template literals, etc.)
+- Access all input items via: const items = $input.all();
+- Access single input via: const item = $input.first();
+- Return transformed items as: return [{json: {...}}];
+- Do NOT use require() or import — n8n provides built-in variables ($input, $json, $node, etc.)
+
+Return ONLY the fixed JavaScript code. No markdown fences, no explanation.`;
+
+    const response = await this.generateContent(prompt, { temperature: 0.1 });
+    return response.replace(/^```(?:javascript|js)?\n?|\n?```$/g, '').trim();
+  }
+
+  async shimCodeNodeWithMockData(code: string): Promise<string> {
+    const prompt = `You are an n8n Code node JavaScript expert.
+The following n8n Code node makes external HTTP/API calls or references other nodes via $('NodeName') — none of which are available in the isolated test environment.
+Your task: completely rewrite it to return hardcoded mock data that matches the expected output structure.
+
+Original code:
+\`\`\`javascript
+${code}
+\`\`\`
+
+Rules:
+- Analyze what data structure the original code was meant to return
+- Write a COMPLETE REPLACEMENT — do NOT keep any HTTP requests, fetch, axios, this.helpers calls, or $('NodeName') references
+- Replace every $('NodeName').first().json.X reference with a reasonable hardcoded value
+- Do NOT use require() or import
+- Return realistic hardcoded mock values as: return [{json: {...}}];
+- The mock data must match the real API response shape so downstream nodes work correctly
+
+Return ONLY the replacement JavaScript code. No markdown fences, no explanation.`;
+
+    const response = await this.generateContent(prompt, { temperature: 0.1 });
+    return response.replace(/^```(?:javascript|js)?\n?|\n?```$/g, '').trim();
+  }
+
   async evaluateCandidates(goal: string, candidates: any[]): Promise<{ selectedIndex: number, reason: string }> {
     if (candidates.length === 0) return { selectedIndex: 0, reason: "No candidates" };
     if (candidates.length === 1) return { selectedIndex: 0, reason: "Single candidate" };
@@ -471,6 +548,215 @@ export class AIService {
     } catch {
         return { selectedIndex: 0, reason: "Failed to parse AI response" };
     }
+  }
+
+  /**
+   * AI-powered error evaluation for n8n test executions.
+   * Replaces brittle regex classifiers — the model reads the error + node list and decides.
+   */
+  async evaluateTestError(
+    errorMessage: string,
+    workflowNodes: any[],
+    failingNodeName?: string,
+    failingNodeCode?: string,
+  ): Promise<TestErrorEvaluation> {
+    const nodesSummary = (workflowNodes || [])
+      .map((n: any) => `- "${n.name}" (${n.type})`)
+      .join('\n');
+
+    const codeContext = failingNodeCode
+      ? `\nFailing node's JavaScript code:\n\`\`\`javascript\n${failingNodeCode}\n\`\`\``
+      : '';
+
+    const prompt = `You are an n8n workflow testing expert. An execution failed with the error below.
+Classify the error and choose the best remediation action.
+
+Error: ${errorMessage}
+${failingNodeName ? `Failing node: "${failingNodeName}"` : ''}${codeContext}
+
+Workflow nodes:
+${nodesSummary}
+
+ACTIONS (choose exactly one):
+• "fix_node" — the error is a fixable node configuration bug in the workflow itself:
+  - nodeFixType "code_node_js":    JavaScript syntax/runtime error in a Code node
+  - nodeFixType "execute_command": shell script error in an Execute Command node
+  - nodeFixType "binary_field":    wrong binaryPropertyName in a node (HTTP Request always outputs field "data")
+• "regenerate_payload" — the test input payload is missing required fields or has wrong values; the workflow logic itself is correct (e.g. "No property named", "is not defined", "$json.body.X" errors)
+• "structural_pass" — the workflow structure is valid but the test environment lacks:
+  external services (Slack, HTTP APIs, OAuth, databases), credentials, upstream binary data, rate limits, or encoding issues (e.g. "could not be parsed").
+  Also use this for any URL or connection error from an external API node (Slack, HTTP Request, Google, etc.) — "Invalid URL", "Failed to connect", "ECONNREFUSED", "401 Unauthorized", "403 Forbidden", "Network error" all indicate the test environment can't reach the external service, not a workflow bug.
+  IMPORTANT: If the failing code uses $('NodeName') to reference other workflow nodes, and those nodes are AI/LLM nodes, external APIs, or services that cannot run in isolation, this is a structural_pass — the workflow requires the full upstream pipeline to test.
+• "escalate" — fundamental design flaw that requires rebuilding the workflow
+
+Respond with ONLY this JSON (no commentary, no markdown):
+{
+  "action": "fix_node" | "regenerate_payload" | "structural_pass" | "escalate",
+  "nodeFixType": "code_node_js" | "execute_command" | "binary_field" | null,
+  "targetNodeName": "<exact node name or null>",
+  "suggestedBinaryField": "data" | null,
+  "reason": "<one sentence>"
+}`;
+
+    try {
+      const response = await this.generateContent(prompt, { temperature: 0.1 });
+      const cleanJson = response.replace(/```json\n?|\n?```/g, '').trim();
+      const result = JSON.parse(jsonrepair(cleanJson));
+      if (!['fix_node', 'regenerate_payload', 'structural_pass', 'escalate'].includes(result.action)) {
+        result.action = 'structural_pass';
+      }
+      return result as TestErrorEvaluation;
+    } catch {
+      return { action: 'structural_pass', reason: 'Could not evaluate error — defaulting to structural pass' };
+    }
+  }
+
+  /**
+   * Offline-only: evaluates whether a fixed Code node or Execute Command script
+   * would succeed given the REAL input items from the fixture's runData.
+   * Used when no live re-execution is possible.
+   */
+  async evaluateCodeFixOffline(
+    fixedCode: string,
+    inputItems: any[],
+    originalError: string,
+    nodeType: 'code_node_js' | 'execute_command',
+  ): Promise<{ wouldPass: boolean; reason: string }> {
+    const codeLabel = nodeType === 'code_node_js' ? 'JavaScript' : 'shell script';
+    const ruleNote = nodeType === 'code_node_js'
+      ? 'n8n Code node rules: use $input.all() / $input.first(), return Array<{json:{...}}>, no require/import.'
+      : 'Shell script runs in the n8n Execute Command node environment.';
+
+    const prompt = `You are an n8n ${codeLabel} execution expert.
+
+A node previously failed with this error:
+${originalError}
+
+It was fixed. The fixed ${codeLabel} is:
+\`\`\`
+${fixedCode}
+\`\`\`
+
+The REAL input items from the fixture are:
+${JSON.stringify(inputItems, null, 2)}
+
+${ruleNote}
+
+Task: Mentally execute the fixed code against these real inputs.
+- Does it have syntax errors?
+- Are all referenced fields present in the input items?
+- Does it address the original error?
+- Would it produce valid output?
+
+Respond with ONLY this JSON (no commentary, no markdown):
+{"wouldPass": true|false, "reason": "<one sentence>"}`;
+
+    try {
+      const response = await this.generateContent(prompt, { temperature: 0.1 });
+      const cleanJson = response.replace(/```json\n?|\n?```/g, '').trim();
+      const result = JSON.parse(jsonrepair(cleanJson));
+      return { wouldPass: Boolean(result.wouldPass), reason: result.reason ?? '' };
+    } catch {
+      return { wouldPass: true, reason: 'Could not evaluate offline — assuming pass' };
+    }
+  }
+
+  /**
+   * Traces binary data flow through an entire workflow graph to find the correct
+   * binary field name for a failing upload node.
+   *
+   * Handles passthrough nodes (Merge, Set, IF, Switch) by tracing further upstream
+   * and reads Code node jsCode to extract the actual binary field assignment.
+   * Delegates graph traversal + analysis entirely to the AI.
+   */
+  async inferBinaryFieldNameFromWorkflow(
+    failingNodeName: string,
+    workflowNodes: any[],
+    workflowConnections: any,
+  ): Promise<string | null> {
+    const nodesSummary = (workflowNodes || [])
+      .map((n: any) => `- "${n.name}" (${n.type})`)
+      .join('\n');
+
+    const connsSummary = Object.entries(workflowConnections || {})
+      .map(([src, targets]: [string, any]) => {
+        const dests = ((targets as any).main || []).flat()
+          .map((c: any) => `"${c?.node}"`)
+          .filter(Boolean)
+          .join(', ');
+        return `"${src}" → [${dests}]`;
+      })
+      .join('\n');
+
+    // Include full jsCode for any Code/Function nodes so the AI can read binary assignments
+    const codeSnippets = (workflowNodes || [])
+      .filter((n: any) =>
+        (n.type === 'n8n-nodes-base.code' || n.type === 'n8n-nodes-base.function') &&
+        n.parameters?.jsCode
+      )
+      .map((n: any) => `\n"${n.name}" (${n.type}) jsCode:\n\`\`\`javascript\n${n.parameters.jsCode}\n\`\`\``)
+      .join('\n');
+
+    const prompt = `You are an n8n binary data expert. Analyze this workflow to find the correct binary field name for the failing upload node.
+
+Failing node: "${failingNodeName}" — error: "has no binary field"
+
+Workflow nodes:
+${nodesSummary}
+
+Connections (source → [targets]):
+${connsSummary}
+${codeSnippets ? `\nCode node implementations:${codeSnippets}` : ''}
+
+Task: Trace binary data flow backwards from "${failingNodeName}" to find the node that actually CREATES or DOWNLOADS the binary data. Then determine what field name it uses for the binary output.
+
+Binary field name rules:
+- n8n-nodes-base.httpRequest → always outputs binary as "data"
+- n8n-nodes-base.readBinaryFile / readBinaryFiles → "data"
+- n8n-nodes-base.code / function → look at jsCode: items[0].binary = { FIELD_NAME: ... } or return [{ binary: { FIELD_NAME: ... } }]
+- n8n-nodes-base.merge / set / if / switch / noOp → pass-through nodes, trace upstream
+- Slack / Google Drive / Dropbox / other API download nodes → "data"
+
+What is the correct binaryPropertyName for "${failingNodeName}"?
+If you cannot determine it with confidence, return null.
+
+Respond ONLY with this JSON (no commentary, no markdown):
+{"binaryFieldName": "the_field_name" | null}`;
+
+    try {
+      const response = await this.generateContent(prompt, { temperature: 0.1 });
+      const cleanJson = response.replace(/```json\n?|\n?```/g, '').trim();
+      const result = JSON.parse(jsonrepair(cleanJson));
+      return typeof result.binaryFieldName === 'string' ? result.binaryFieldName : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Returns jsCode for an n8n Code node (runOnceForAllItems) that produces
+   * synthetic binary test data in the specified field.
+   *
+   * Hardcoded — no LLM call — because the n8n Code node binary format is
+   * deterministic and LLM-generated variants consistently misuse APIs that
+   * aren't available (this.helpers.prepareBinaryData, $input.all() in wrong mode, etc.).
+   */
+  generateBinaryShimCode(binaryFieldName: string): string {
+    const fieldKey = JSON.stringify(binaryFieldName);
+    return [
+      `const base64 = Buffer.from('n8m-test-binary', 'utf-8').toString('base64');`,
+      `return $input.all().map(item => ({`,
+      `  json: item.json,`,
+      `  binary: {`,
+      `    ${fieldKey}: {`,
+      `      data: base64,`,
+      `      mimeType: 'text/plain',`,
+      `      fileName: 'test-file.txt',`,
+      `      fileExtension: 'txt'`,
+      `    }`,
+      `  }`,
+      `}));`,
+    ].join('\n');
   }
 
   /**

@@ -495,4 +495,112 @@ export class N8nClient {
     const baseUrl = this.apiUrl.replace('/api/v1', '')
     return `${baseUrl}/workflow/${workflowId}`
   }
+
+  /**
+   * Node types that never make external HTTP calls — pure logic, control flow,
+   * data transformation, or local execution.  Everything else is a candidate
+   * for shimming during test runs.
+   */
+  private static readonly PASS_THROUGH_TYPES = new Set([
+    'n8n-nodes-base.webhook',
+    'n8n-nodes-base.manualTrigger',
+    'n8n-nodes-base.scheduleTrigger',
+    'n8n-nodes-base.intervalTrigger',
+    'n8n-nodes-base.code',
+    'n8n-nodes-base.function',
+    'n8n-nodes-base.functionItem',
+    'n8n-nodes-base.if',
+    'n8n-nodes-base.switch',
+    'n8n-nodes-base.set',
+    'n8n-nodes-base.editFields',
+    'n8n-nodes-base.merge',
+    'n8n-nodes-base.noOp',
+    'n8n-nodes-base.executeWorkflow',
+    'n8n-nodes-base.executeWorkflowTrigger',
+    'n8n-nodes-base.respondToWebhook',
+    'n8n-nodes-base.wait',
+    'n8n-nodes-base.splitInBatches',
+    'n8n-nodes-base.aggregate',
+    'n8n-nodes-base.splitOut',
+    'n8n-nodes-base.itemLists',
+    'n8n-nodes-base.filter',
+    'n8n-nodes-base.sort',
+    'n8n-nodes-base.limit',
+    'n8n-nodes-base.removeDuplicates',
+    'n8n-nodes-base.dateTime',
+    'n8n-nodes-base.html',
+    'n8n-nodes-base.htmlExtract',
+    'n8n-nodes-base.xml',
+    'n8n-nodes-base.markdown',
+    'n8n-nodes-base.compression',
+    'n8n-nodes-base.convertToFile',
+    'n8n-nodes-base.extractFromFile',
+    'n8n-nodes-base.crypto',
+    'n8n-nodes-base.executeCommand',
+    'n8n-nodes-base.stickyNote',
+    'n8n-nodes-base.start',
+  ]);
+
+  /**
+   * Replace every node that makes external network calls with an inert Code shim
+   * returning plausible fake data.  Node NAMES (and IDs) are preserved so
+   * connections stay valid.  Used to ensure tests never hit real external services.
+   *
+   * Shimming criteria: the node has credentials configured OR is an HTTP Request node.
+   * Pure-logic nodes in PASS_THROUGH_TYPES are always left untouched.
+   */
+  static shimNetworkNodes(nodes: any[]): any[] {
+    return nodes.map((node: any) => {
+      if (!node) return node;
+      if (N8nClient.PASS_THROUGH_TYPES.has(node.type)) return node;
+      // LangChain sub-nodes (@n8n/ namespace) communicate via supplyData(), not main outputs.
+      // Replacing them with Code nodes breaks the supplyData protocol — skip shimming.
+      if (node.type?.startsWith('@n8n/')) return node;
+      const hasCredentials = node.credentials && Object.keys(node.credentials).length > 0;
+      const isHttpRequest = node.type === 'n8n-nodes-base.httpRequest';
+      if (!hasCredentials && !isHttpRequest) return node;
+      return {
+        id: node.id,
+        name: node.name,
+        type: 'n8n-nodes-base.code',
+        typeVersion: 2,
+        position: node.position,
+        parameters: {
+          mode: 'runOnceForAllItems',
+          jsCode: N8nClient.buildNetworkShimCode(node.type),
+        },
+      };
+    });
+  }
+
+  /** Generate the JS body for a Code shim that stands in for an external-calling node. */
+  static buildNetworkShimCode(nodeType: string): string {
+    const t = nodeType.toLowerCase();
+    if (t.includes('httprequest')) {
+      return `// [n8m:shim] HTTP Request — no external call made during testing\nreturn [{ json: { status: 200, statusText: 'OK', body: '{"ok":true,"shimmed":true}', headers: { 'content-type': 'application/json' } } }];`;
+    }
+    if (t.includes('openai') || t.includes('anthropic') || t.includes('gemini') || t.includes('lmchat') || t.includes('languagemodel')) {
+      return `// [n8m:shim] AI node — no external call made during testing\nreturn [{ json: { message: { role: 'assistant', content: '[test shim: AI response]' }, finish_reason: 'stop', usage: { total_tokens: 0 } } }];`;
+    }
+    if (t.includes('slack')) {
+      return `// [n8m:shim] Slack — no external call made during testing\nreturn [{ json: { ok: true, ts: '1000000000.000001', channel: 'C00000000', message: { text: '[test shim]' } } }];`;
+    }
+    if (t.includes('gmail') || t.includes('emailsend') || t.includes('sendemail') || t.includes('imap')) {
+      return `// [n8m:shim] Email — no external call made during testing\nreturn [{ json: { id: 'shim-msg-id', threadId: 'shim-thread-id', labelIds: ['SENT'] } }];`;
+    }
+    if (t.includes('googledrive') || t.includes('googlesheets') || t.includes('googledocs')) {
+      return `// [n8m:shim] Google service — no external call made during testing\nreturn [{ json: { kind: 'drive#file', id: 'shim-id', name: 'shim', mimeType: 'application/json' } }];`;
+    }
+    if (t.includes('github') || t.includes('gitlab')) {
+      return `// [n8m:shim] Git service — no external call made during testing\nreturn [{ json: { id: 1, number: 1, title: '[test shim]', state: 'open', html_url: 'https://example.com' } }];`;
+    }
+    if (t.includes('telegram') || t.includes('discord') || t.includes('teams') || t.includes('mattermost')) {
+      return `// [n8m:shim] Messaging service — no external call made during testing\nreturn [{ json: { ok: true, result: { message_id: 1, text: '[test shim]' } } }];`;
+    }
+    if (t.includes('airtable') || t.includes('notion') || t.includes('jira') || t.includes('asana') || t.includes('trello')) {
+      return `// [n8m:shim] Project management service — no external call made during testing\nreturn [{ json: { id: 'shim-id', name: '[test shim]', status: 'ok' } }];`;
+    }
+    // Default: generic success response for any other credentialed service node
+    return `// [n8m:shim] External service — no external call made during testing\nreturn [{ json: { ok: true, shimmed: true, id: 'shim-id', result: '[test shim]' } }];`;
+  }
 }

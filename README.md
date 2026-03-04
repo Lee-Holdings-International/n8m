@@ -142,22 +142,114 @@ n8m doc
 
 ### `n8m test` — Validate and auto-repair a workflow
 
-Deploys a workflow ephemerally to your instance, validates it, and purges it
-when done. If validation fails, the repair loop kicks in automatically.
+Validates a workflow against your n8n instance. If it fails, the AI repair loop
+kicks in — analyzing the error, applying fixes, and retrying automatically.
 
 ```bash
-# Test a local file
+# Test a local file or remote workflow (browse to select)
 n8m test ./workflows/my-flow.json
-
-# Browse and pick from local files + instance workflows
 n8m test
+
+# Generate 3 diverse AI test scenarios (happy path, edge case, error)
+n8m test --ai-scenarios
+
+# Use a specific fixture file for offline testing
+n8m test --fixture .n8m/fixtures/abc123.json
+n8m test -f ./my-fixture.json
 ```
 
 - Resolves and deploys sub-workflow dependencies automatically
-- Patches node IDs after ephemeral deployment
+- After a passing live test, prompts to **save a fixture** for future offline runs
+- When a fixture exists for a workflow, prompts to **run offline** (no n8n calls)
 - After a passing test, prompts to deploy or save the validated/repaired version
 - **Auto-documents**: Generates or updates the project `README.md` upon saving.
 - All temporary assets are deleted on exit
+
+#### Offline testing with fixtures
+
+n8m can capture real execution data from n8n and replay it offline — no live
+instance, credentials, or external API calls needed.
+
+**First run — capture a fixture:**
+```bash
+n8m test                          # runs live against your n8n instance
+# → Save fixture for future offline runs? [Y/n]  ← answer Y
+# → .n8m/fixtures/<workflowId>.json created
+```
+
+**Subsequent runs — replay offline:**
+```bash
+n8m test
+# → Fixture found from Mar 4, 2026, 10:30 AM. Run offline? [Y/n]
+```
+
+The offline mode uses your real node-by-node execution data, so the AI evaluator
+works with actual production outputs rather than mocked data. The AI healing loop
+still runs — if the captured execution shows an error, n8m will try to fix it and
+evaluate the fix against the real fixture data.
+
+---
+
+### `n8m fixture` — Manage test fixtures
+
+Two ways to create a fixture:
+
+```bash
+# Pull real execution data from n8n (no test run required)
+n8m fixture capture <workflowId>
+
+# Scaffold an empty template to fill in by hand
+n8m fixture init <workflowId>
+```
+
+**`capture`** connects to your n8n instance, fetches the most recent execution
+for the workflow, and saves it as a fixture — no tests run. Use this when you
+have a workflow that already ran successfully in n8n and you want to lock in that
+execution data for offline testing going forward.
+
+```bash
+n8m fixture capture abc123
+# → Fetching workflow abc123 from n8n...
+# → Found execution ex_xyz (success, 2026-03-04T10:30:00Z)
+# → Fixture saved to .n8m/fixtures/abc123.json
+# →   Workflow: My Workflow
+# →   Execution: success · 5 node(s) captured
+```
+
+**`init`** creates an empty template when you want to define the fixture data
+yourself, without needing a live execution first.
+
+```json
+{
+  "$schema": "../../node_modules/n8m/dist/fixture-schema.json",
+  "version": "1.0",
+  "workflowId": "abc123",
+  "workflowName": "My Workflow",
+  "workflow": { "name": "My Workflow", "nodes": [], "connections": {} },
+  "execution": {
+    "status": "success",
+    "data": {
+      "resultData": {
+        "error": null,
+        "runData": {
+          "Your Node Name": [{ "json": { "key": "value" } }]
+        }
+      }
+    }
+  }
+}
+```
+
+Fill in `execution.data.resultData.runData` with the actual output of each node
+(keyed by exact node name). Then test against it:
+
+```bash
+n8m test --fixture .n8m/fixtures/abc123.json
+```
+
+Fixture files are project-local (`.n8m/fixtures/`) and should be committed to
+your repo so your team can run the same offline tests. Add the `$schema` field to
+get autocomplete and validation in any editor that supports JSON Schema.
 
 ---
 
@@ -306,5 +398,7 @@ npm run dev
 - [x] AI-driven test scenario generation (`--ai-scenarios`)
 - [x] Static node type reference & fallback mechanism
 - [x] Multi-workflow project generation support
+- [x] Fixture record & replay — offline testing with real execution data
+- [x] Hand-crafted fixture scaffolding (`n8m fixture init`) with JSON Schema
 - [ ] Native n8n canvas integration
 - [ ] Multi-agent collaboration on a single goal

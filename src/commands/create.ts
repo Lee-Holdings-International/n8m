@@ -9,6 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { graph, resumeAgenticWorkflow } from '../agentic/graph.js';
 import { promptMultiline } from '../utils/multilinePrompt.js';
 import { DocService } from '../services/doc.service.js';
+import { ConfigManager } from '../utils/config.js';
+import { N8nClient } from '../utils/n8nClient.js';
 
 export default class Create extends Command {
   static args = {
@@ -258,6 +260,44 @@ export default class Create extends Command {
         savedResources.push({ path: targetFile, name: projectTitle, original: workflow });
     }
     
+    // 4. DEPLOY PROMPT
+    const deployConfig = await ConfigManager.load();
+    const n8nUrl = process.env.N8N_API_URL || deployConfig.n8nUrl;
+    const n8nKey = process.env.N8N_API_KEY || deployConfig.n8nKey;
+
+    if (n8nUrl && n8nKey) {
+        const { shouldDeploy } = await inquirer.prompt([{
+            type: 'confirm',
+            name: 'shouldDeploy',
+            message: 'Deploy validated workflow to n8n?',
+            default: true,
+        }]);
+
+        if (shouldDeploy) {
+            const { activate } = await inquirer.prompt([{
+                type: 'confirm',
+                name: 'activate',
+                message: 'Activate workflow after deployment?',
+                default: false,
+            }]);
+
+            const client = new N8nClient({ apiUrl: n8nUrl, apiKey: n8nKey });
+            for (const { name, original } of savedResources) {
+                try {
+                    const result = await client.createWorkflow(name, original);
+                    this.log(theme.done(`Deployed: ${name} [ID: ${result.id}]`));
+                    this.log(`${theme.label('Link')} ${theme.secondary(client.getWorkflowLink(result.id))}`);
+                    if (activate) {
+                        await client.activateWorkflow(result.id);
+                        this.log(theme.info('Workflow activated.'));
+                    }
+                } catch (err) {
+                    this.log(theme.error(`Deploy failed for "${name}": ${(err as Error).message}`));
+                }
+            }
+        }
+    }
+
     this.log(theme.done('Agentic Workflow Complete.'));
     process.exit(0);
   }

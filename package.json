@@ -85,7 +85,7 @@
     }
   },
   "scripts": {
-    "build": "shx rm -rf dist && tsc -b && shx mkdir -p dist/resources && shx cp src/resources/*.json dist/resources/",
+    "build": "shx rm -rf dist && tsc -b && shx mkdir -p dist/resources && shx cp src/resources/*.json dist/resources/ && shx cp src/fixture-schema.json dist/fixture-schema.json",
     "lint": "eslint .",
     "postpack": "shx rm -f oclif.manifest.json",
     "posttest": "npm run lint",

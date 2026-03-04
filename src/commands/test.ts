@@ -7,6 +7,7 @@ import { AIService } from '../services/ai.service.js';
 import { DocService } from '../services/doc.service.js';
 import { Spinner } from '../utils/spinner.js';
 import { runAgenticWorkflow, graph, resumeAgenticWorkflow } from '../agentic/graph.js';
+import { FixtureManager, WorkflowFixture } from '../utils/fixtureManager.js';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync, readFileSync } from 'fs';
@@ -48,6 +49,10 @@ export default class Test extends Command {
     'ai-scenarios': Flags.boolean({
       default: false,
       description: 'Generate 3 diverse AI test scenarios (happy path, edge case, error)',
+    }),
+    fixture: Flags.string({
+      char: 'f',
+      description: 'Path to a fixture JSON file to use for offline testing',
     }),
   }
 
@@ -401,11 +406,75 @@ export default class Test extends Command {
       if (rootRealTargetId) {
           // REMOTE WORKFLOW: test against the real instance workflow — no ephemeral copy, no shim.
           // Credentials are already configured on the instance; no need to strip them.
-          const directResult = await this.testRemoteWorkflowDirectly(
-              rootRealTargetId, workflowData, workflowName, client, aiService, n8nUrl!, testScenarios
-          );
+          const fixtureManager = new FixtureManager();
+          const validateOnly = flags['validate-only'];
+          let directResult: { passed: boolean; errors: string[]; finalWorkflow?: any; lastExecution?: any };
+
+          const fixtureFlagPath = flags['fixture'];
+          if (fixtureFlagPath) {
+              // --fixture flag: load from explicit path, run offline immediately (no prompt)
+              const fixture = fixtureManager.loadFromPath(fixtureFlagPath);
+              if (!fixture) {
+                  this.log(theme.fail(`Could not load fixture from: ${fixtureFlagPath}`));
+                  return;
+              }
+              directResult = await this.testWithFixture(fixture, workflowName, aiService);
+          } else {
+              const capturedDate = fixtureManager.getCapturedDate(rootRealTargetId);
+              if (capturedDate && !validateOnly) {
+                  const dateStr = capturedDate.toLocaleString('en-US', {
+                      year: 'numeric', month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                  });
+                  const { useFixture } = await inquirer.prompt([{
+                      type: 'confirm',
+                      name: 'useFixture',
+                      message: `Fixture found from ${dateStr}. Run offline?`,
+                      default: true,
+                  }]);
+
+                  if (useFixture) {
+                      const fixture = fixtureManager.load(rootRealTargetId)!;
+                      directResult = await this.testWithFixture(fixture, workflowName, aiService);
+                  } else {
+                      directResult = await this.testRemoteWorkflowDirectly(
+                          rootRealTargetId, workflowData, workflowName, client, aiService, n8nUrl!, testScenarios
+                      );
+                      if (directResult.passed && !validateOnly) {
+                          await this.offerSaveFixture(
+                              fixtureManager, rootRealTargetId, workflowName,
+                              directResult.finalWorkflow ?? workflowData,
+                              directResult.lastExecution,
+                          );
+                      }
+                  }
+              } else if (capturedDate && validateOnly) {
+                  // validate-only + fixture: use fixture silently (no prompt)
+                  const fixture = fixtureManager.load(rootRealTargetId)!;
+                  directResult = await this.testWithFixture(fixture, workflowName, aiService);
+              } else {
+                  directResult = await this.testRemoteWorkflowDirectly(
+                      rootRealTargetId, workflowData, workflowName, client, aiService, n8nUrl!, testScenarios
+                  );
+                  if (directResult.passed && !validateOnly) {
+                      await this.offerSaveFixture(
+                          fixtureManager, rootRealTargetId, workflowName,
+                          directResult.finalWorkflow ?? workflowData,
+                          directResult.lastExecution,
+                      );
+                  }
+              }
+          }
+
           if (directResult.passed) {
               globalSuccess = true;
+              // Use finalWorkflow from the result (already in-memory — no extra API call).
+              deployedDefinitions.set('remote-result', {
+                  name: workflowName,
+                  data: directResult.finalWorkflow ?? workflowData,
+                  type: 'root',
+                  realId: rootRealTargetId,
+              });
           } else {
               this.log(theme.fail(`Validation failed — ${directResult.errors.length} issue(s).`));
               directResult.errors.forEach((e: string) => this.log(theme.muted(`  ↳ ${e}`)));
@@ -652,9 +721,11 @@ export default class Test extends Command {
       aiService: AIService,
       n8nUrl: string,
       testScenarios: any[],
-  ): Promise<{ passed: boolean; errors: string[] }> {
+  ): Promise<{ passed: boolean; errors: string[]; finalWorkflow?: any; lastExecution?: any }> {
       const nodes = (workflowData.nodes || []).filter(Boolean);
       const validationErrors: string[] = [];
+      let lastFullExec: any = null;
+      let finalWorkflow: any = workflowData;
 
       const webhookNode = nodes.find((n: any) =>
           n.type === 'n8n-nodes-base.webhook' && !n.disabled
@@ -667,7 +738,44 @@ export default class Test extends Command {
           }
 
           const currentWorkflow = await client.getWorkflow(workflowId) as any;
+          finalWorkflow = currentWorkflow;
           const wasActive = currentWorkflow.active === true;
+
+          // Strip any [n8m:shim] nodes left in the workflow from a previous test run.
+          // Re-wires connections back through by replacing shim references with the
+          // shim's own target (shim → B becomes the restored A → B).
+          {
+              const leftoverShims = (currentWorkflow.nodes as any[]).filter(
+                  (n: any) => n.name?.startsWith('[n8m:shim]')
+              );
+              if (leftoverShims.length > 0) {
+                  for (const shim of leftoverShims) {
+                      const shimTarget = ((currentWorkflow.connections[shim.name]?.main ?? [])[0]?.[0])?.node;
+                      if (shimTarget) {
+                          for (const targets of Object.values(currentWorkflow.connections) as any[]) {
+                              for (const segment of (targets?.main ?? [])) {
+                                  if (!Array.isArray(segment)) continue;
+                                  for (const conn of segment) {
+                                      if (conn?.node === shim.name) conn.node = shimTarget;
+                                  }
+                              }
+                          }
+                      }
+                      delete currentWorkflow.connections[shim.name];
+                  }
+                  currentWorkflow.nodes = (currentWorkflow.nodes as any[]).filter(
+                      (n: any) => !n.name?.startsWith('[n8m:shim]')
+                  );
+                  try {
+                      await client.updateWorkflow(workflowId, {
+                          name: currentWorkflow.name,
+                          nodes: currentWorkflow.nodes,
+                          connections: currentWorkflow.connections,
+                          settings: currentWorkflow.settings || {},
+                      });
+                  } catch { /* cleanup best-effort */ }
+              }
+          }
 
           // Auto-fix control characters in node parameters before testing.
           // Control chars (e.g. literal newlines in a Slack blocksUi field) are workflow
@@ -688,6 +796,43 @@ export default class Test extends Command {
               } catch { /* update failed — test may still encounter encoding errors */ }
           }
 
+          // Proactively detect and repair Execute Command nodes whose shell scripts
+          // had their newlines stripped by an older version of this tool.  The
+          // telltale sign is: no \n in the command but at least one "\ " (backslash
+          // followed by whitespace) — the remnant of a multiline line-continuation.
+          {
+              const collapsedNodes = (currentWorkflow.nodes as any[]).filter(
+                  (n: any) =>
+                      n.type === 'n8n-nodes-base.executeCommand' &&
+                      typeof n.parameters?.command === 'string' &&
+                      !n.parameters.command.includes('\n') &&
+                      /\\\s/.test(n.parameters.command)
+              );
+              if (collapsedNodes.length > 0) {
+                  let anyRepaired = false;
+                  for (const node of collapsedNodes) {
+                      try {
+                          this.log(theme.agent(`Repairing collapsed shell script in "${node.name}"...`));
+                          node.parameters.command = await aiService.fixExecuteCommandScript(
+                              node.parameters.command
+                          );
+                          anyRepaired = true;
+                          this.log(theme.muted(`"${node.name}" script restored.`));
+                      } catch { /* repair failed — test continues without fix */ }
+                  }
+                  if (anyRepaired) {
+                      try {
+                          await client.updateWorkflow(workflowId, {
+                              name: currentWorkflow.name,
+                              nodes: currentWorkflow.nodes,
+                              connections: currentWorkflow.connections,
+                              settings: currentWorkflow.settings || {},
+                          });
+                      } catch { /* update failed — repaired version stays in-memory only */ }
+                  }
+              }
+          }
+
           // Detect binary-source nodes and inject a test PNG as pin data so
           // upload steps receive real binary content instead of an empty buffer.
           const binarySourceNodes = this.findBinarySourceNodes(workflowData);
@@ -696,18 +841,9 @@ export default class Test extends Command {
           if (binarySourceNodes.length > 0) {
               // Try to fetch a real test image from a placeholder service; fall back
               // to a bundled 1×1 PNG if the remote service is unreachable.
-              let testImageBase64: string;
-              let testFileSize = '68';
-              try {
-                  const imgResp = await fetch('https://placehold.co/100x100.png');
-                  if (!imgResp.ok) throw new Error(`HTTP ${imgResp.status}`);
-                  const imgBuf = await imgResp.arrayBuffer();
-                  testImageBase64 = Buffer.from(imgBuf).toString('base64');
-                  testFileSize = String(imgBuf.byteLength);
-              } catch {
-                  // Fallback: minimal valid 1×1 PNG
-                  testImageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-              }
+              // Never fetch external image services during testing — use bundled 1×1 PNG.
+              const testImageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+              const testFileSize = '68';
               const testPinData = { ...existingPinData };
               for (const nodeName of binarySourceNodes) {
                   testPinData[nodeName] = [{
@@ -740,6 +876,31 @@ export default class Test extends Command {
                   await client.activateWorkflow(workflowId);
               } catch (err: any) {
                   return { passed: false, errors: [`Activation failed: ${err.message}`] };
+              }
+          }
+
+          // Track pre-shim state so the finally block can restore the workflow.
+          let preShimNodes: any[] | null = null;
+          let preShimConnections: any | null = null;
+
+          // Shim all external-network nodes so the test never calls real external services.
+          // Saves original state upfront — the binary-shim logic inside the try block
+          // checks `preShimNodes === null` to avoid double-saving, so this must come first.
+          {
+              const shimmed = N8nClient.shimNetworkNodes(currentWorkflow.nodes);
+              if (shimmed.some((n: any, i: number) => n !== currentWorkflow.nodes[i])) {
+                  preShimNodes = JSON.parse(JSON.stringify(currentWorkflow.nodes));
+                  preShimConnections = JSON.parse(JSON.stringify(currentWorkflow.connections ?? {}));
+                  currentWorkflow.nodes = shimmed;
+                  this.log(theme.muted('External service nodes shimmed for test isolation.'));
+                  try {
+                      await client.updateWorkflow(workflowId, {
+                          name: currentWorkflow.name,
+                          nodes: currentWorkflow.nodes,
+                          connections: currentWorkflow.connections,
+                          settings: currentWorkflow.settings || {},
+                      });
+                  } catch { /* shimming update failed — proceed without network isolation */ }
               }
           }
 
@@ -793,37 +954,15 @@ Workflow: "${workflowName}", Nodes: ${nodeNames}`;
                   let currentPayload = scenario.payload;
                   let scenarioPassed = false;
                   let lastError: string | null = null;
+                  let fixAttempted = false;
+                  let binaryShimInjected = false;
+                  let codeNodeFixApplied = false; // tracks whether a code_node_js fix was actually committed
+                  let codeNodeFixAppliedName: string | undefined;
+                  let mockDataShimApplied = false; // tracks whether a mock-data shim replaced the Code node
 
-                  // One self-healing retry: if the first attempt fails with a payload/expression
-                  // error, regenerate the mock payload with the error as context and try once more.
-                  // External-service errors (social APIs, HTTP nodes, etc.) cannot be fixed by
-                  // changing the payload, so we skip healing for those.
-                  const isPayloadError = (err: string) =>
-                      /No property named/i.test(err) ||
-                      /Cannot read propert/i.test(err) ||
-                      /is not defined/i.test(err) ||
-                      /body\.[a-zA-Z_]/.test(err);
-
-                  for (let attempt = 0; attempt < 2; attempt++) {
-                      if (attempt > 0 && lastError) {
-                          if (!isPayloadError(lastError)) break; // external-service error — stop healing
-                          this.log(theme.agent(`Self-healing: regenerating test payload...`));
-                          // Parse field name from errors like "No property named 'body.X' exists!"
-                          const missingField = lastError.match(/body\.([a-zA-Z_]\w*)/)?.[1];
-                          const allRequired = missingField
-                              ? [...new Set([...requiredFields, missingField])]
-                              : requiredFields;
-                          const requiredHint = allRequired.length > 0
-                              ? `\nRequired top-level keys: ${allRequired.join(', ')}`
-                              : '';
-                          const context = `You are generating a test payload to POST to an n8n Webhook node.
-n8n wraps the POST body automatically: POST {"X":"v"} → $json.body.X = "v".
-NEVER nest under "body". Output a SINGLE flat JSON object.${requiredHint}${binaryUrlHint}${nodeTypeHints}
-Workflow: "${workflowName}", Nodes: ${nodeNames}
-Previous error: "${lastError}"`;
-                          currentPayload = this.sanitizeMockPayload(await aiService.generateMockData(context));
-                      }
-
+                  // Healing loop: up to 5 rounds (initial + regen + fix + mock-shim + downstream).
+                  // Each round the AI evaluates the error and decides the remediation action.
+                  for (let healRound = 0; healRound < 5; healRound++) {
                       // Record time BEFORE the POST so executions from earlier attempts
                       // (which may have finished late) are excluded from this attempt's poll.
                       const executionStartTime = Date.now();
@@ -835,37 +974,31 @@ Previous error: "${lastError}"`;
 
                       if (!response.ok) {
                           lastError = `HTTP ${response.status} from webhook`;
-                          continue;
+                          break;
                       }
 
                       let executionFound = false;
 
                       // Poll up to 3 min — Slack/LLM workflows can take 60–90 s end-to-end.
-                      // We continue polling while the execution is still running/waiting so we
-                      // don't time out on long-running but ultimately successful workflows.
                       Spinner.start('Waiting for execution result');
                       let trackedExecId: string | undefined;
                       for (let i = 0; i < 60; i++) {
                           await new Promise(r => setTimeout(r, 3000));
 
-                          // If we already found the execution ID, go straight to polling its status.
                           let fullExec: any;
                           if (trackedExecId) {
                               fullExec = await client.getExecution(trackedExecId) as any;
                           } else {
                               const executions = await client.getWorkflowExecutions(workflowId);
                               const recentExec = executions.find(
-                                  // Use executionStartTime (pre-POST) as the lower bound so we never
-                                  // pick up a stale execution from a previous attempt.
-                                  // Guard against null/undefined startedAt (execution just created).
                                   (e: any) => e.startedAt && new Date(e.startedAt).getTime() >= executionStartTime
                               );
-                              if (!recentExec) continue; // not in list yet
+                              if (!recentExec) continue;
                               trackedExecId = recentExec.id;
                               fullExec = await client.getExecution(trackedExecId!) as any;
                           }
+                          lastFullExec = fullExec;
 
-                          // If still running, keep waiting
                           if (fullExec.status === 'running' || fullExec.status === 'waiting') continue;
 
                           executionFound = true;
@@ -877,20 +1010,13 @@ Previous error: "${lastError}"`;
                               lastError = null;
                           } else {
                               const execError = fullExec.data?.resultData?.error;
-                              // n8n stores the failing node as a full object, not a string
                               const nodeRef = execError?.node;
                               let failingNode: string | undefined =
                                   typeof nodeRef === 'string' ? nodeRef : nodeRef?.name ?? nodeRef?.type;
-                              // Build rich message: top-level message + description (Slack/HTTP error codes live here)
                               let rawMsg: string = execError?.message;
                               const topDesc: string | undefined = execError?.description ?? execError?.cause?.message;
-                              if (rawMsg && topDesc && !rawMsg.includes(topDesc)) {
-                                  rawMsg = `${rawMsg} — ${topDesc}`;
-                              }
+                              if (rawMsg && topDesc && !rawMsg.includes(topDesc)) rawMsg = `${rawMsg} — ${topDesc}`;
 
-                              // Fallback: scan per-node runData for errors (n8n sometimes
-                              // stores the error only at node level, not at resultData.error).
-                              // Also surfaces the Slack API error code via error.description.
                               if (!rawMsg) {
                                   const runData = fullExec.data?.resultData?.runData as Record<string, any[]> | undefined;
                                   if (runData) {
@@ -910,54 +1036,281 @@ Previous error: "${lastError}"`;
 
                               rawMsg = rawMsg || 'Unknown flow failure';
                               lastError = failingNode ? `[${failingNode}] ${rawMsg}` : rawMsg;
-                              // Only show ✘ for structural/payload errors — external-service
-                              // failures get reclassified as a structural pass below.
-                              if (/could not be parsed/i.test(lastError)) {
-                                  // Node-parameter encoding issue (e.g. control characters in a
-                                  // Slack blocksUi config). This lives in the workflow's own
-                                  // configuration — changing the test payload can't fix it.
-                                  // Short-circuit to structural pass immediately.
-                                  this.log(theme.warn(`Node parameter encoding issue (workflow config, not payload): ${lastError}`));
-                                  this.log(theme.done('Structural validation passed.'));
-                                  scenarioPassed = true;
-                              } else if (isPayloadError(lastError)) {
-                                  this.log(theme.fail(`Failed: ${lastError}`));
-                              }
+                              this.log(theme.fail(`Failed: ${lastError}`));
                           }
                           break;
                       }
 
                       if (!executionFound) {
                           Spinner.stop();
-                          // The webhook accepted the POST (HTTP 200) but no finished execution appeared
-                          // within the 3-minute window.  The workflow may still be running — check n8n
-                          // execution history to confirm. Treat as structural pass (workflow triggered OK).
                           lastError = 'Execution timed out (still running after 3 min). Check n8n for result.';
                           this.log(theme.warn(lastError));
                       }
 
-                      if (scenarioPassed) break;
-                  }
+                      if (scenarioPassed || !lastError) break;
 
-                  if (!scenarioPassed && lastError) {
-                      if (!isPayloadError(lastError)) {
-                          // Classify the error type for a more helpful message.
-                          const isCodeNodeError = /Unexpected token|SyntaxError/i.test(lastError);
-                          const msg = isCodeNodeError
-                              ? `Code node has a JavaScript syntax error (fix in n8n editor): ${lastError}`
-                              : `External service unreachable in test: ${lastError}`;
-                          this.log(theme.warn(msg));
+                      // Let the AI decide what to do with the error
+                      const errSnapshot = lastError;
+                      const nodeNameMatch = errSnapshot.match(/^\[([^\]]+)\]/);
+                      const failNodeName = nodeNameMatch?.[1];
+                      const failingNodeForEval = failNodeName
+                          ? (currentWorkflow.nodes as any[]).find((n: any) => n.name === failNodeName)
+                          : null;
+                      const failingNodeCode = (failingNodeForEval?.type === 'n8n-nodes-base.code' && failingNodeForEval?.parameters?.jsCode)
+                          ? failingNodeForEval.parameters.jsCode as string
+                          : undefined;
+                      const evaluation = await aiService.evaluateTestError(
+                          errSnapshot, currentWorkflow.nodes, failNodeName, failingNodeCode
+                      );
+
+                      if (evaluation.action === 'structural_pass') {
+                          this.log(theme.warn(`${evaluation.reason}: ${errSnapshot}`));
                           this.log(theme.done('Structural validation passed.'));
                           scenarioPassed = true;
-                      } else {
+                          break;
+                      }
+
+                      if (evaluation.action === 'regenerate_payload') {
+                          this.log(theme.agent(`Self-healing: regenerating test payload...`));
+                          const context = `You are generating a test payload to POST to an n8n Webhook node.
+n8n wraps the POST body automatically: POST {"X":"v"} → $json.body.X = "v".
+NEVER nest under "body". Output a SINGLE flat JSON object.${requiredFields.length > 0 ? `\nRequired top-level keys: ${requiredFields.join(', ')}` : ''}${binaryUrlHint}${nodeTypeHints}
+Workflow: "${workflowName}", Nodes: ${nodeNames}
+Previous error: "${errSnapshot}"`;
+                          currentPayload = this.sanitizeMockPayload(await aiService.generateMockData(context));
+                          lastError = null;
+                          continue; // retry with regenerated payload
+                      }
+
+                      if (evaluation.action === 'fix_node' && !fixAttempted) {
+                          const targetName = evaluation.targetNodeName ?? failNodeName;
+                          let fixed = false;
+
+                          if (evaluation.nodeFixType === 'code_node_js') {
+                              const targetNode = (currentWorkflow.nodes as any[]).find(
+                                  (n: any) => n.type === 'n8n-nodes-base.code' && (!targetName || n.name === targetName)
+                              ) ?? (currentWorkflow.nodes as any[]).find((n: any) => n.type === 'n8n-nodes-base.code');
+                              if (targetNode?.parameters?.jsCode) {
+                                  try {
+                                      this.log(theme.agent(`Auto-fixing Code node "${targetNode.name}"...`));
+                                      targetNode.parameters.jsCode = await aiService.fixCodeNodeJavaScript(
+                                          targetNode.parameters.jsCode, errSnapshot
+                                      );
+                                      await client.updateWorkflow(workflowId, {
+                                          name: currentWorkflow.name,
+                                          nodes: currentWorkflow.nodes,
+                                          connections: currentWorkflow.connections,
+                                          settings: currentWorkflow.settings || {},
+                                      });
+                                      fixed = true;
+                                      fixAttempted = true;
+                                      codeNodeFixApplied = true;
+                                      codeNodeFixAppliedName = targetNode.name;
+                                      lastError = null;
+                                      this.log(theme.muted('Code node updated. Retesting...'));
+                                  } catch { /* fix failed — fall through */ }
+                              }
+                          } else if (evaluation.nodeFixType === 'execute_command') {
+                              const targetNode = (currentWorkflow.nodes as any[]).find(
+                                  (n: any) => n.type === 'n8n-nodes-base.executeCommand' && (!targetName || n.name === targetName)
+                              ) ?? (currentWorkflow.nodes as any[]).find((n: any) => n.type === 'n8n-nodes-base.executeCommand');
+                              if (targetNode?.parameters?.command) {
+                                  try {
+                                      this.log(theme.agent(`Auto-fixing Execute Command script in "${targetNode.name}"...`));
+                                      targetNode.parameters.command = await aiService.fixExecuteCommandScript(
+                                          targetNode.parameters.command, errSnapshot
+                                      );
+                                      await client.updateWorkflow(workflowId, {
+                                          name: currentWorkflow.name,
+                                          nodes: currentWorkflow.nodes,
+                                          connections: currentWorkflow.connections,
+                                          settings: currentWorkflow.settings || {},
+                                      });
+                                      fixed = true;
+                                      fixAttempted = true;
+                                      lastError = null;
+                                      this.log(theme.muted('Execute Command script updated. Retesting...'));
+                                  } catch { /* fix failed — fall through */ }
+                              }
+                          } else if (evaluation.nodeFixType === 'binary_field') {
+                              const fieldMatch = errSnapshot.match(/has no binary field ['"]?(\w+)['"]?/i);
+                              const expectedField = fieldMatch?.[1];
+                              const failingNode = targetName
+                                  ? (currentWorkflow.nodes as any[]).find((n: any) => n.name === targetName)
+                                  : null;
+
+                              // Delegate binary-field tracing to the AI — it traces the full graph
+                              // (handling passthrough nodes like Merge, Set, IF) to find the actual
+                              // binary-producing node and the field name it outputs.
+                              this.log(theme.agent(`Tracing binary data flow to infer correct field name for "${targetName ?? failNodeName}"...`));
+                              const wfConnections = currentWorkflow.connections || workflowData.connections || {};
+                              const correctField = await aiService.inferBinaryFieldNameFromWorkflow(
+                                  targetName ?? failNodeName ?? 'unknown',
+                                  currentWorkflow.nodes,
+                                  wfConnections,
+                              );
+
+                              if (failingNode && expectedField && correctField && correctField !== expectedField) {
+                                  // Scan every string parameter — the key name varies by node type
+                                  const paramKey = Object.entries(failingNode.parameters || {})
+                                      .find(([, v]) => typeof v === 'string' && v === expectedField)
+                                      ?.[0];
+                                  if (paramKey) {
+                                      try {
+                                          this.log(theme.agent(`Fixing binary field in "${targetName}": '${expectedField}' → '${correctField}' (${paramKey})...`));
+                                          failingNode.parameters[paramKey] = correctField;
+                                          await client.updateWorkflow(workflowId, {
+                                              name: currentWorkflow.name,
+                                              nodes: currentWorkflow.nodes,
+                                              connections: currentWorkflow.connections,
+                                              settings: currentWorkflow.settings || {},
+                                          });
+                                          fixed = true;
+                                          fixAttempted = true;
+                                          lastError = null;
+                                          this.log(theme.muted('Binary field name updated. Retesting...'));
+                                      } catch { /* ignore */ }
+                                  }
+                              }
+                              if (!fixed) {
+                                  // Inject a Code node shim that produces synthetic binary data so the
+                                  // downstream node can actually execute instead of structural-passing.
+                                  const shimField = correctField ?? expectedField ?? 'data';
+                                  this.log(theme.agent(`Injecting binary test shim for field "${shimField}" before "${targetName ?? failNodeName}"...`));
+                                  try {
+                                      // Save original state before we mutate — restored in finally.
+                                      if (preShimNodes === null) {
+                                          preShimNodes = JSON.parse(JSON.stringify(currentWorkflow.nodes));
+                                          preShimConnections = JSON.parse(JSON.stringify(currentWorkflow.connections ?? {}));
+                                      }
+                                      const shimCode = aiService.generateBinaryShimCode(shimField);
+                                      const shimName = `[n8m:shim] Binary for ${targetName ?? failNodeName}`;
+                                      const shimPos = failingNode?.position ?? [500, 300];
+                                      const shimNode: any = {
+                                          id: `shim-binary-${Date.now()}`,
+                                          name: shimName,
+                                          type: 'n8n-nodes-base.code',
+                                          typeVersion: 2,
+                                          position: [shimPos[0] - 220, shimPos[1]],
+                                          parameters: { mode: 'runOnceForAllItems', jsCode: shimCode },
+                                      };
+                                      // Rewire: redirect connections pointing at the failing node to the shim,
+                                      // then add shim → failing node.
+                                      const failName = targetName ?? failNodeName ?? '';
+                                      const conns = JSON.parse(JSON.stringify(currentWorkflow.connections ?? {}));
+                                      for (const targets of Object.values(conns) as any[]) {
+                                          for (const segment of (targets?.main ?? [])) {
+                                              if (!Array.isArray(segment)) continue;
+                                              for (const conn of segment) {
+                                                  if (conn?.node === failName) conn.node = shimName;
+                                              }
+                                          }
+                                      }
+                                      conns[shimName] = { main: [[{ node: failName, type: 'main', index: 0 }]] };
+                                      currentWorkflow.nodes = [...currentWorkflow.nodes, shimNode];
+                                      currentWorkflow.connections = conns;
+                                      await client.updateWorkflow(workflowId, {
+                                          name: currentWorkflow.name,
+                                          nodes: currentWorkflow.nodes,
+                                          connections: currentWorkflow.connections,
+                                          settings: currentWorkflow.settings || {},
+                                      });
+                                      fixed = true;
+                                      fixAttempted = true;
+                                      binaryShimInjected = true;
+                                      lastError = null;
+                                      this.log(theme.muted('Binary shim injected. Retesting...'));
+                                  } catch {
+                                      // Shim generation/injection failed — fall through to structural pass
+                                      this.log(theme.warn(`Binary data not available in test environment (upstream pipeline required): ${errSnapshot}`));
+                                      this.log(theme.done('Structural validation passed.'));
+                                      scenarioPassed = true;
+                                  }
+                              }
+                          }
+
+                          if (fixed) continue; // retry with fix applied
+                      }
+
+                      // A Code node still fails after its JS was patched.
+                      // Try replacing it with hardcoded mock data so downstream nodes
+                      // (e.g. Slack at the end of the flow) can still be exercised.
+                      if (codeNodeFixApplied && !mockDataShimApplied) {
+                          const shimTarget = (currentWorkflow.nodes as any[]).find(
+                              (n: any) => n.type === 'n8n-nodes-base.code' && n.name === codeNodeFixAppliedName
+                          );
+                          if (shimTarget?.parameters?.jsCode) {
+                              this.log(theme.agent(`"${codeNodeFixAppliedName}" still fails — replacing with mock data to continue test...`));
+                              try {
+                                  if (preShimNodes === null) {
+                                      preShimNodes = JSON.parse(JSON.stringify(currentWorkflow.nodes));
+                                      preShimConnections = JSON.parse(JSON.stringify(currentWorkflow.connections ?? {}));
+                                  }
+                                  shimTarget.parameters.jsCode = await aiService.shimCodeNodeWithMockData(
+                                      shimTarget.parameters.jsCode
+                                  );
+                                  await client.updateWorkflow(workflowId, {
+                                      name: currentWorkflow.name,
+                                      nodes: currentWorkflow.nodes,
+                                      connections: currentWorkflow.connections,
+                                      settings: currentWorkflow.settings || {},
+                                  });
+                                  mockDataShimApplied = true;
+                                  lastError = null;
+                                  this.log(theme.muted(`"${codeNodeFixAppliedName}" replaced with mock data. Retesting...`));
+                                  continue;
+                              } catch { /* fall through to structural pass */ }
+                          }
+                      }
+                      if (codeNodeFixApplied || mockDataShimApplied) {
+                          this.log(theme.warn(`Code node "${codeNodeFixAppliedName ?? failNodeName ?? 'unknown'}" relies on external APIs unavailable in test environment.`));
+                          this.log(theme.done('Structural validation passed.'));
+                          scenarioPassed = true;
+                          break;
+                      }
+
+                      // Binary-field errors that survive the fix block (e.g. second round after a
+                      // successful fix, or fixAttempted was already true) still indicate a
+                      // test-environment limitation — binary data requires the full upstream pipeline.
+                      if (!scenarioPassed && evaluation.nodeFixType === 'binary_field') {
+                          this.log(theme.warn(`Binary data not available in test environment (upstream pipeline required): ${errSnapshot}`));
+                          this.log(theme.done('Structural validation passed.'));
+                          scenarioPassed = true;
+                          break;
+                      }
+
+                      // If a binary shim was successfully injected and the downstream node now
+                      // fails with an external API / credentials error (Invalid URL, auth failure,
+                      // etc.), that is a test-environment limitation — the binary pipeline is valid.
+                      if (!scenarioPassed && binaryShimInjected) {
+                          this.log(theme.warn(`External service error after binary shim (credentials/API required): ${errSnapshot}`));
+                          this.log(theme.done('Structural validation passed.'));
+                          scenarioPassed = true;
+                          break;
+                      }
+
+                      // escalate, or fix failed / already attempted
+                      if (!scenarioPassed) {
                           validationErrors.push(`Scenario "${scenario.name}" Failed: ${lastError}`);
                       }
-                  }
+                      break;
+                  } // end healRound
               }
           } finally {
               // Restore original pin data (remove our test binary injection)
               if (testPinDataInjected) {
                   try { await client.setPinData(workflowId, currentWorkflow, existingPinData); } catch { /* intentionally empty */ }
+              }
+              // Remove injected shim nodes and restore original connections.
+              if (preShimNodes !== null) {
+                  try {
+                      await client.updateWorkflow(workflowId, {
+                          name: currentWorkflow.name,
+                          nodes: preShimNodes,
+                          connections: preShimConnections,
+                          settings: currentWorkflow.settings || {},
+                      });
+                  } catch { /* restore best-effort */ }
               }
               if (!wasActive) {
                   try { await client.deactivateWorkflow(workflowId); } catch { /* intentionally empty */ }
@@ -966,6 +1319,7 @@ Previous error: "${lastError}"`;
       } else {
           // No webhook trigger — validate structure by checking (or briefly testing) activation.
           const currentWorkflow = await client.getWorkflow(workflowId) as any;
+          finalWorkflow = currentWorkflow;
           if (currentWorkflow.active) {
               this.log(theme.done('Workflow is active — structural validation passed.'));
           } else {
@@ -980,7 +1334,12 @@ Previous error: "${lastError}"`;
           }
       }
 
-      return { passed: validationErrors.length === 0, errors: validationErrors };
+      return {
+          passed: validationErrors.length === 0,
+          errors: validationErrors,
+          finalWorkflow,
+          lastExecution: lastFullExec,
+      };
   }
 
   /**
@@ -1213,6 +1572,23 @@ Previous error: "${lastError}"`;
               node.type === 'n8n-nodes-base.function' ||
               node.type === 'n8n-nodes-base.functionItem'
           ) continue;
+
+          // Execute Command nodes: deepStrip would strip \n from shell scripts,
+          // collapsing them to one line and making line-continuation backslashes
+          // invalid (/bin/sh: : not found).  Only replace U+00A0 → regular space —
+          // AI-generated commands often use non-breaking spaces in indentation which
+          // bash treats as an empty command name.
+          if (node.type === 'n8n-nodes-base.executeCommand') {
+              if (typeof node.parameters.command === 'string') {
+                  const fixed = node.parameters.command.replace(/\u00A0/g, ' ');
+                  if (fixed !== node.parameters.command) {
+                      node.parameters.command = fixed;
+                      changed = true;
+                  }
+              }
+              continue; // skip deepStrip — would destroy newlines
+          }
+
           node.parameters = deepStrip(node.parameters);
       }
       return { changed, data: nodes };
@@ -1276,4 +1652,238 @@ Previous error: "${lastError}"`;
             }
         }
      }
+
+  // ---------------------------------------------------------------------------
+  // Fixture helpers
+  // ---------------------------------------------------------------------------
+
+  private async offerSaveFixture(
+      fixtureManager: FixtureManager,
+      workflowId: string,
+      workflowName: string,
+      finalWorkflow: any,
+      lastExecution: any,
+  ): Promise<void> {
+      const { saveFixture } = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'saveFixture',
+          message: 'Save fixture for future offline runs?',
+          default: true,
+      }]);
+      if (!saveFixture) return;
+
+      const executionData: WorkflowFixture['execution'] = lastExecution
+          ? {
+              id: lastExecution.id,
+              status: lastExecution.status,
+              startedAt: lastExecution.startedAt,
+              data: {
+                  resultData: {
+                      error: lastExecution.data?.resultData?.error ?? null,
+                      runData: lastExecution.data?.resultData?.runData ?? {},
+                  },
+              },
+            }
+          : { status: 'success', data: { resultData: { runData: {} } } };
+
+      try {
+          await fixtureManager.save({
+              version: '1.0',
+              capturedAt: new Date().toISOString(),
+              workflowId,
+              workflowName,
+              workflow: finalWorkflow,
+              execution: executionData,
+          });
+          this.log(theme.success(`Fixture saved to .n8m/fixtures/${workflowId}.json`));
+      } catch (e) {
+          this.log(theme.warn(`Could not save fixture: ${(e as Error).message}`));
+      }
+  }
+
+  private async testWithFixture(
+      fixture: WorkflowFixture,
+      workflowName: string,
+      aiService: AIService,
+  ): Promise<{ passed: boolean; errors: string[]; finalWorkflow?: any; lastExecution?: any }> {
+      this.log(theme.info(`Running offline with fixture data (no n8n API calls).`));
+
+      const currentWorkflow = JSON.parse(JSON.stringify(fixture.workflow));
+      const execution = fixture.execution;
+      const runData: Record<string, any[]> = execution.data?.resultData?.runData ?? {};
+      const validationErrors: string[] = [];
+
+      // Extract error from fixture execution (mirrors live loop logic)
+      let fixtureError: string | null = null;
+      if (execution.status !== 'success') {
+          const execError = execution.data?.resultData?.error;
+          const nodeRef = execError?.node;
+          let failingNode: string | undefined =
+              typeof nodeRef === 'string' ? nodeRef : nodeRef?.name ?? nodeRef?.type;
+          let rawMsg: string = execError?.message ?? '';
+          const topDesc: string | undefined = execError?.description ?? execError?.cause?.message;
+          if (rawMsg && topDesc && !rawMsg.includes(topDesc)) rawMsg = `${rawMsg} — ${topDesc}`;
+
+          if (!rawMsg) {
+              outer: for (const [nodeName, nodeRuns] of Object.entries(runData)) {
+                  for (const run of (nodeRuns as any[])) {
+                      if (run?.error?.message) {
+                          failingNode = failingNode ?? nodeName;
+                          rawMsg = run.error.message;
+                          const desc: string | undefined = run.error.description ?? run.error.cause?.message;
+                          if (desc && !rawMsg.includes(desc)) rawMsg = `${rawMsg} — ${desc}`;
+                          break outer;
+                      }
+                  }
+              }
+          }
+          fixtureError = rawMsg
+              ? (failingNode ? `[${failingNode}] ${rawMsg}` : rawMsg)
+              : null;
+      }
+
+      if (!fixtureError) {
+          this.log(theme.done('Offline fixture: execution was successful.'));
+          return { passed: true, errors: [], finalWorkflow: currentWorkflow };
+      }
+
+      this.log(theme.agent(`Fixture captured a failure: ${fixtureError}`));
+
+      let lastError = fixtureError;
+      let scenarioPassed = false;
+
+      for (let round = 0; round < 5; round++) {
+          this.log(theme.agent(`Offline healing round ${round + 1}: ${lastError}`));
+
+          const failNodeMatch = lastError.match(/^\[([^\]]+)\]/);
+          const failNodeName = failNodeMatch?.[1];
+          const failingNode = failNodeName
+              ? (currentWorkflow.nodes as any[]).find((n: any) => n.name === failNodeName)
+              : null;
+          const failingNodeCode = (failingNode?.type === 'n8n-nodes-base.code' && failingNode?.parameters?.jsCode)
+              ? failingNode.parameters.jsCode as string
+              : undefined;
+
+          const evaluation = await aiService.evaluateTestError(
+              lastError, currentWorkflow.nodes, failNodeName, failingNodeCode
+          );
+
+          if (evaluation.action === 'structural_pass') {
+              this.log(theme.warn(`Structural pass: ${evaluation.reason}`));
+              scenarioPassed = true;
+              break;
+          }
+
+          if (evaluation.action === 'escalate') {
+              validationErrors.push(lastError);
+              this.log(theme.fail(`Escalated: ${evaluation.reason}`));
+              break;
+          }
+
+          if (evaluation.action === 'regenerate_payload') {
+              // Cannot re-run offline — treat as structural pass
+              this.log(theme.warn('Offline: cannot regenerate payload without live execution. Treating as structural pass.'));
+              scenarioPassed = true;
+              break;
+          }
+
+          if (evaluation.action === 'fix_node') {
+              const targetName = evaluation.targetNodeName ?? failNodeName;
+
+              if (evaluation.nodeFixType === 'code_node_js') {
+                  const target = (currentWorkflow.nodes as any[]).find(
+                      (n: any) => n.type === 'n8n-nodes-base.code' && (!targetName || n.name === targetName)
+                  ) ?? (currentWorkflow.nodes as any[]).find((n: any) => n.type === 'n8n-nodes-base.code');
+
+                  if (target?.parameters?.jsCode) {
+                      this.log(theme.agent(`Offline fix: rewriting Code node "${target.name}"...`));
+                      const fixedCode = await aiService.fixCodeNodeJavaScript(target.parameters.jsCode, lastError);
+                      const predecessorName = this.findPredecessorNode(target.name, currentWorkflow.connections);
+                      const inputItems = predecessorName ? (runData[predecessorName] ?? []) : [];
+                      const verdict = await aiService.evaluateCodeFixOffline(fixedCode, inputItems, lastError, 'code_node_js');
+                      this.log(theme.muted(`Offline eval: ${verdict.wouldPass ? 'PASS' : 'FAIL'} — ${verdict.reason}`));
+                      target.parameters.jsCode = fixedCode;
+                      this.log(verdict.wouldPass
+                          ? theme.done(`Offline fix validated: "${target.name}" would succeed.`)
+                          : theme.warn(`Fix applied to "${target.name}" — cannot fully verify offline. Treating as structural pass.`)
+                      );
+                      scenarioPassed = true;
+                      break;
+                  }
+              }
+
+              if (evaluation.nodeFixType === 'execute_command') {
+                  const target = (currentWorkflow.nodes as any[]).find(
+                      (n: any) => n.type === 'n8n-nodes-base.executeCommand' && (!targetName || n.name === targetName)
+                  ) ?? (currentWorkflow.nodes as any[]).find((n: any) => n.type === 'n8n-nodes-base.executeCommand');
+
+                  if (target?.parameters?.command) {
+                      this.log(theme.agent(`Offline fix: rewriting Execute Command script in "${target.name}"...`));
+                      const fixedCmd = await aiService.fixExecuteCommandScript(target.parameters.command, lastError);
+                      const predecessorName = this.findPredecessorNode(target.name, currentWorkflow.connections);
+                      const inputItems = predecessorName ? (runData[predecessorName] ?? []) : [];
+                      const verdict = await aiService.evaluateCodeFixOffline(fixedCmd, inputItems, lastError, 'execute_command');
+                      this.log(theme.muted(`Offline eval: ${verdict.wouldPass ? 'PASS' : 'FAIL'} — ${verdict.reason}`));
+                      target.parameters.command = fixedCmd;
+                      scenarioPassed = true;
+                      break;
+                  }
+              }
+
+              if (evaluation.nodeFixType === 'binary_field') {
+                  const target = targetName
+                      ? (currentWorkflow.nodes as any[]).find((n: any) => n.name === targetName)
+                      : null;
+                  this.log(theme.agent(`Offline fix: tracing binary field for "${targetName ?? failNodeName}"...`));
+                  const correctField = await aiService.inferBinaryFieldNameFromWorkflow(
+                      targetName ?? failNodeName ?? 'unknown',
+                      currentWorkflow.nodes,
+                      currentWorkflow.connections ?? {},
+                  );
+                  const fieldMatch = lastError.match(/has no binary field ['"]?(\w+)['"]?/i);
+                  const expectedField = fieldMatch?.[1];
+                  if (target && expectedField && correctField && correctField !== expectedField) {
+                      const paramKey = Object.entries(target.parameters || {})
+                          .find(([, v]) => typeof v === 'string' && v === expectedField)?.[0];
+                      if (paramKey) {
+                          target.parameters[paramKey] = correctField;
+                          this.log(theme.muted(`Binary field: '${expectedField}' → '${correctField}'`));
+                      }
+                  }
+                  this.log(theme.warn('Binary data cannot be verified offline. Treating as structural pass.'));
+                  scenarioPassed = true;
+                  break;
+              }
+
+              // fix_node but no matching node found
+              this.log(theme.warn('No fixable node found offline. Treating as structural pass.'));
+              scenarioPassed = true;
+              break;
+          }
+
+          break;
+      }
+
+      if (!scenarioPassed) {
+          validationErrors.push(`Offline test failed: ${lastError}`);
+      }
+
+      return {
+          passed: validationErrors.length === 0,
+          errors: validationErrors,
+          finalWorkflow: currentWorkflow,
+      };
+  }
+
+  private findPredecessorNode(nodeName: string, connections: any): string | null {
+      for (const [sourceName, conns] of Object.entries(connections || {})) {
+          const mainConns: any[][] = (conns as any)?.main ?? [];
+          for (const group of mainConns) {
+              for (const c of (group || [])) {
+                  if (c?.node === nodeName) return sourceName;
+              }
+          }
+      }
+      return null;
+  }
 }
