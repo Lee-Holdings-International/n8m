@@ -18,10 +18,12 @@ export class NodeDefinitionsService {
     private static instance: NodeDefinitionsService;
     private definitions: any[] = [];
     private client: N8nClient;
+    private defaultClient: N8nClient;
 
     private constructor() {
         // Will be overridden in loadDefinitions() once config is available
         this.client = new N8nClient();
+        this.defaultClient = this.client;
     }
 
     public static getInstance(): NodeDefinitionsService {
@@ -44,7 +46,7 @@ export class NodeDefinitionsService {
             // Env vars take priority over stored config
             const apiUrl = process.env.N8N_API_URL || config.n8nUrl;
             const apiKey = process.env.N8N_API_KEY || config.n8nKey;
-            if (apiUrl && apiKey) {
+            if (apiUrl && apiKey && this.client === this.defaultClient) {
                 this.client = new N8nClient({ apiUrl, apiKey });
             }
 

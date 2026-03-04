@@ -202,18 +202,23 @@ n8m fixture capture <workflowId>
 n8m fixture init <workflowId>
 ```
 
-**`capture`** connects to your n8n instance, fetches the most recent execution
-for the workflow, and saves it as a fixture — no tests run. Use this when you
-have a workflow that already ran successfully in n8n and you want to lock in that
-execution data for offline testing going forward.
+**`capture`** connects to your n8n instance, fetches the 25 most recent
+executions for the workflow, and presents an interactive menu to pick which one
+to save as a fixture — no tests run. Use this when you have a workflow that
+already ran successfully in n8n and you want to lock in that execution data for
+offline testing going forward.
 
 ```bash
 n8m fixture capture abc123
-# → Fetching workflow abc123 from n8n...
-# → Found execution ex_xyz (success, 2026-03-04T10:30:00Z)
+# → Fetching executions for workflow abc123...
+# → ? Select an execution to capture:
+# →   #177916  success  3/4/2026, 10:48:47 AM
+# →   #177914  success  3/4/2026, 10:48:23 AM
+# → ❯ #177913  error    3/4/2026, 10:47:59 AM
+# → Selected execution 177913
 # → Fixture saved to .n8m/fixtures/abc123.json
 # →   Workflow: My Workflow
-# →   Execution: success · 5 node(s) captured
+# →   Execution: error · 5 node(s) captured
 ```
 
 **`init`** creates an empty template when you want to define the fixture data

@@ -3,7 +3,6 @@ import { theme } from '../utils/theme.js';
 import { runAgenticWorkflowStream } from '../agentic/graph.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import inquirer from 'inquirer';
 import { randomUUID } from 'node:crypto';
 import { graph, resumeAgenticWorkflow } from '../agentic/graph.js';
@@ -92,7 +91,6 @@ export default class Create extends Command {
     this.log(theme.info(`\nInitializing Agentic Workflow for: "${description}" (Session: ${threadId})`));
     
     let lastWorkflowJson: any = null;
-    let lastSpec: any = null;
     
     try {
         const stream = await runAgenticWorkflowStream(description, threadId);
@@ -105,7 +103,6 @@ export default class Create extends Command {
             if (nodeName === 'architect') {
                 this.log(theme.agent(`🏗️  Architect: Blueprint designed.`));
                 if (stateUpdate.strategies && stateUpdate.strategies.length > 0) {
-                    lastSpec = stateUpdate.strategies[0]; // Default to primary
                     this.log(theme.header('\nPROPOSED STRATEGIES:'));
                     stateUpdate.strategies.forEach((s: any, i: number) => {
                         this.log(`${i === 0 ? theme.success('  [Primary]') : theme.info('  [Alternative]')} ${theme.value(s.suggestedName)}`);
@@ -236,7 +233,6 @@ export default class Create extends Command {
 
     const docService = DocService.getInstance();
     for (const workflow of workflows) {
-        const workflowName = workflow.name || (lastSpec && lastSpec.suggestedName) || 'generated-workflow';
         const projectTitle = await docService.generateProjectTitle(workflow);
         workflow.name = projectTitle; // Standardize name
         

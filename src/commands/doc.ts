@@ -26,7 +26,7 @@ export default class Doc extends Command {
   }
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parse(Doc)
+    const { args } = await this.parse(Doc)
     this.log(theme.brand());
     this.log(theme.header('WORKFLOW DOCUMENTATION'));
 

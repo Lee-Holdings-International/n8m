@@ -155,14 +155,17 @@ describe('reviewerNode', () => {
         ],
         connections: {
           'Schedule Trigger': { main: [[{ node: 'Set', type: 'main', index: 0 }]] },
-          // 'Orphan' has no incoming connections
+          // 'Orphan' has no incoming connections — reviewer auto-connects it
         },
       };
       const result = await reviewerNode(makeState({ workflowJson: wf }));
-      expect(result.validationStatus).to.equal('failed');
-      const errors = result.validationErrors!.join(' ');
-      expect(errors).to.include('Orphan');
-      expect(errors).to.include('disconnected');
+      // The reviewer auto-connects orphaned nodes rather than failing
+      expect(result.validationStatus).to.equal('passed');
+      // The returned workflowJson should have the orphan chained after Set
+      const patched = (result as any).workflowJson;
+      expect(patched).to.exist;
+      expect(patched.connections['Set']).to.exist;
+      expect(patched.connections['Set'].main[0][0].node).to.equal('Orphan');
     });
 
     it('does not flag a trigger node as an orphan', async () => {

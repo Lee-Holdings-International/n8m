@@ -1550,6 +1550,7 @@ Previous error: "${errSnapshot}"`;
       let changed = false;
       const deepStrip = (val: any): any => {
           if (typeof val === 'string') {
+              // eslint-disable-next-line no-control-regex
               const clean = val.replace(/[\x00-\x1F\x7F]/g, '');
               if (clean !== val) changed = true;
               return clean;
@@ -1606,6 +1607,7 @@ Previous error: "${errSnapshot}"`;
           // This includes LF/CR — necessary because AI-generated Block Kit JSON often embeds
           // literal newlines inside stringified JSON values, causing n8n's parser to throw
           // "Bad control character in string literal in JSON".
+          // eslint-disable-next-line no-control-regex
           return data.replace(/[\x00-\x1F\x7F]/g, '');
       }
       if (Array.isArray(data)) return data.map((v: any) => this.sanitizeMockPayload(v));
@@ -1749,7 +1751,7 @@ Previous error: "${errSnapshot}"`;
 
       this.log(theme.agent(`Fixture captured a failure: ${fixtureError}`));
 
-      let lastError = fixtureError;
+      const lastError = fixtureError;
       let scenarioPassed = false;
 
       for (let round = 0; round < 5; round++) {

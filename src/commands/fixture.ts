@@ -197,7 +197,7 @@ export default class Fixture extends Command {
 
     resolvedName = resolvedName ?? (workflow as any).name ?? resolvedId
 
-    this.log(theme.agent(`Fetching most recent execution...`))
+    this.log(theme.agent(`Fetching executions for workflow ${resolvedId}...`))
 
     let executions: any[]
     try {
@@ -212,8 +212,28 @@ export default class Fixture extends Command {
       return
     }
 
-    const latest = executions[0]
-    this.log(theme.muted(`  Found execution ${latest.id} (${latest.status}, ${latest.startedAt})`))
+    const executionChoices = executions.map((ex: any) => {
+      const date = ex.startedAt ? new Date(ex.startedAt).toLocaleString() : 'unknown time'
+      const rawStatus = ex.status ?? (ex.finished === true ? 'success' : ex.finished === false ? 'running' : undefined)
+      const statusLabel = rawStatus === 'success' ? theme.success(rawStatus)
+        : rawStatus ? theme.fail(rawStatus)
+        : theme.muted('unknown')
+      return {
+        name: `#${ex.id}  ${statusLabel}  ${theme.muted(date)}`,
+        value: ex,
+      }
+    })
+
+    const { selectedExecution } = await inquirer.prompt([{
+      type: 'select',
+      name: 'selectedExecution',
+      message: 'Select an execution to capture:',
+      choices: executionChoices,
+      pageSize: 15,
+    }])
+
+    const latest = selectedExecution
+    this.log(theme.muted(`  Selected execution ${latest.id} (${latest.status}, ${latest.startedAt})`))
 
     let fullExec: any
     try {
