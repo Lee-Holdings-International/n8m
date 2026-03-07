@@ -3,9 +3,13 @@
 > Generate, modify, test, and deploy n8n workflows from the command line using
 > AI.
 
+[![npm](https://img.shields.io/npm/v/@lhi/n8m.svg)](https://www.npmjs.com/package/@lhi/n8m)
+[![npm downloads](https://img.shields.io/npm/dm/@lhi/n8m.svg)](https://www.npmjs.com/package/@lhi/n8m)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://badgen.net/badge/Built%20with/TypeScript/blue)](https://typescriptlang.org/)
 [![oclif](https://badgen.net/badge/CLI/oclif/purple)](https://oclif.io/)
 [![n8n](https://badgen.net/badge/n8n/Compatible/orange)](https://n8n.io)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/Lee-Holdings-International/n8m#sponsors)
 
 **Stop clicking. Start shipping.** `n8m` is an open-source CLI that wraps your
 n8n instance with an agentic AI layer. Describe what you want in plain English —
@@ -518,7 +522,25 @@ npm run dev
 
 ## Sponsors
 
-### Partially Sponsored By
+n8m is MIT-licensed and free forever. Sponsorship directly funds AI API costs,
+continued development, and the time it takes to keep up with n8n's rapidly
+evolving node ecosystem.
+
+### Sponsor tiers
+
+| Tier | Amount | What you get |
+|------|--------|--------------|
+| **Supporter** | $5 / mo | Name in the README sponsors list |
+| **Studio** | $25 / mo | Logo in the README + priority issue responses |
+| **Enterprise** | $100 / mo | Logo + a direct line for feature requests and integration questions |
+
+[Become a sponsor on Ko-fi](https://ko-fi.com/lcanady) · [GitHub Sponsors](https://github.com/sponsors/lcanady)
+
+---
+
+### Current Sponsors
+
+#### Partial Sponsors
 
 [The Daily Caller](https://dailycaller.com)
 
