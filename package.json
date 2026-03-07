@@ -3,6 +3,27 @@
   "version": "0.3.1",
   "description": "Agentic n8n CLI wrapper - A Skill Bridge for n8n workflow automation",
   "author": "Lem Canady",
+  "keywords": [
+    "n8n",
+    "workflow",
+    "automation",
+    "ai",
+    "agentic",
+    "cli",
+    "llm",
+    "openai",
+    "anthropic",
+    "claude",
+    "gemini",
+    "langgraph",
+    "mcp",
+    "model-context-protocol",
+    "workflow-automation",
+    "workflow-generator",
+    "no-code",
+    "low-code",
+    "devtools"
+  ],
   "license": "MIT",
   "bin": {
     "n8m": "./bin/run.js"
