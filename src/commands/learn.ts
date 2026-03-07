@@ -196,7 +196,7 @@ export default class Learn extends Command {
 
     this.log(theme.info(`Found ${mdFiles.length} pattern(s).`));
 
-    const { checkbox } = await import('inquirer');
+    const { default: checkbox } = await import('@inquirer/checkbox');
     const selected: string[] = await checkbox({
       message: 'Select patterns to import:',
       choices: mdFiles.map(f => ({ name: f.path, value: f.path, checked: true })),
