@@ -21,42 +21,38 @@ export const architectNode = async (state: typeof TeamState.State) => {
     };
   }
 
-  try {
-    const credentials = state.availableCredentials ?? [];
-    const spec = await aiService.generateSpec(state.userGoal, credentials);
+  const credentials = state.availableCredentials ?? [];
+  const spec = await aiService.generateSpec(state.userGoal, credentials);
 
-    // Check if the spec requires clarification
-    const questions = spec.questions;
-    const needsClarification = questions && questions.length > 0;
+  // Check if the spec requires clarification
+  const questions = spec.questions;
+  const needsClarification = questions && questions.length > 0;
 
-    // Multi-agent collaboration: generate an alternative strategy in parallel with the primary.
-    // Both are handed off to separate Engineer agents that run concurrently.
-    const alternativeSpec = await aiService.generateAlternativeSpec(state.userGoal, spec, credentials);
+  // Multi-agent collaboration: generate an alternative strategy in parallel with the primary.
+  // Both are handed off to separate Engineer agents that run concurrently.
+  const alternativeSpec = await aiService.generateAlternativeSpec(state.userGoal, spec, credentials);
 
-    const alternativeModel = aiService.getAlternativeModel();
+  const alternativeModel = aiService.getAlternativeModel();
 
-    const strategies = [
-      { 
-        ...spec, 
-        strategyName: "Primary Strategy", 
-        aiModel: aiService.getDefaultModel()
-      },
-      { 
-        ...alternativeSpec, 
-        strategyName: "Alternative Strategy", 
-        aiModel: alternativeModel
-      },
-    ];
+  const strategies = [
+    {
+      ...spec,
+      strategyName: "Primary Strategy",
+      aiModel: aiService.getDefaultModel()
+    },
+    {
+      ...alternativeSpec,
+      strategyName: "Alternative Strategy",
+      aiModel: alternativeModel
+    },
+  ];
 
-    const logEntry = `Architect: Generated 2 strategies — "${strategies[0].suggestedName}" (primary) and "${strategies[1].suggestedName}" (alternative)`;
+  const logEntry = `Architect: Generated 2 strategies — "${strategies[0].suggestedName}" (primary) and "${strategies[1].suggestedName}" (alternative)`;
 
-    return {
-      spec,
-      strategies,
-      needsClarification,
-      collaborationLog: [logEntry],
-    };
-  } catch (error) {
-    throw error;
-  }
+  return {
+    spec,
+    strategies,
+    needsClarification,
+    collaborationLog: [logEntry],
+  };
 };
