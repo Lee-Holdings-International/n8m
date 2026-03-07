@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="n8m-cover.png" alt="n8m — agentic n8n workflow generator" width="100%" />
+  <img src="https://n8m.run/social-card.png" alt="n8m — agentic n8n workflow generator" width="100%" />
 </div>
 
 > Generate, modify, test, and deploy n8n workflows from the command line using
