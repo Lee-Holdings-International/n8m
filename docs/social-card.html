@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>n8m social card</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* exact GitHub OG size */
+    html, body {
+      width: 1280px;
+      height: 640px;
+      overflow: hidden;
+    }
+
+    body {
+      background: #0b0d14;
+      font-family: 'IBM Plex Sans', sans-serif;
+      color: #f1f5f9;
+      position: relative;
+    }
+
+    /* dot grid */
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, #1a2035 1px, transparent 1px);
+      background-size: 30px 30px;
+      opacity: .5;
+    }
+
+    /* green radial glow — top right */
+    body::after {
+      content: '';
+      position: absolute;
+      top: -160px;
+      right: -120px;
+      width: 720px;
+      height: 720px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(34,197,94,.12) 0%, transparent 65%);
+      pointer-events: none;
+    }
+
+    /* indigo glow — bottom left */
+    .glow-bl {
+      position: absolute;
+      bottom: -180px;
+      left: -100px;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(99,102,241,.08) 0%, transparent 65%);
+      pointer-events: none;
+    }
+
+    /* safe-zone wrapper — 40px inset all sides */
+    .safe {
+      position: absolute;
+      inset: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 48px;
+    }
+
+    /* ── LEFT ── */
+    .left {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 100%;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .top-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      color: #64748b;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .top-meta .sep { color: #1a2035; }
+
+    .center-block {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 18px;
+    }
+
+    /* logo row */
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* headline */
+    .headline {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 62px;
+      line-height: 1.0;
+      letter-spacing: -.04em;
+      color: #f1f5f9;
+    }
+    .headline em {
+      font-style: normal;
+      color: #4ade80;
+    }
+
+    .tagline {
+      font-size: 20px;
+      color: #94a3b8;
+      line-height: 1.5;
+      max-width: 520px;
+    }
+
+    /* bottom tags */
+    .tags {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .tag {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid #1a2035;
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .tag-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+    /* ── RIGHT — large decorative logo mark ── */
+    .right {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    /* glow ring behind the mark */
+    .mark-glow {
+      position: absolute;
+      width: 340px;
+      height: 340px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(34,197,94,.18) 0%, transparent 70%);
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-bl"></div>
+
+  <div class="safe">
+
+    <!-- LEFT CONTENT -->
+    <div class="left">
+
+      <div class="top-meta">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color:#3d5070">
+          <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+        </svg>
+        Lee-Holdings-International
+        <span class="sep">/</span>
+        n8m
+      </div>
+
+      <div class="center-block">
+        <div class="logo-row">
+          <!-- n8m logo mark -->
+          <svg width="44" height="60" viewBox="0 0 22 30" fill="none" aria-hidden="true">
+            <rect x="0" y="0" width="22" height="30" rx="5" fill="#22c55e"/>
+            <rect x="3.5" y="3" width="15" height="10" rx="3" fill="#0b0d14"/>
+            <rect x="3.5" y="17" width="15" height="10" rx="3" fill="#0b0d14"/>
+          </svg>
+          <span style="font-family:'IBM Plex Sans',sans-serif;font-weight:700;font-size:42px;letter-spacing:-.02em;color:#f1f5f9;">n8m</span>
+        </div>
+
+        <div class="headline">
+          Stop clicking.<br><em>Start shipping.</em>
+        </div>
+
+        <div class="tagline">
+          Agentic AI CLI for n8n &mdash; describe a workflow in plain English,
+          get production-ready JSON in seconds.
+        </div>
+      </div>
+
+      <div class="tags">
+        <div class="tag">
+          <span class="tag-dot" style="background:#3178c6;"></span>
+          TypeScript
+        </div>
+        <div class="tag">
+          <span class="tag-dot" style="background:#22c55e;"></span>
+          MIT License
+        </div>
+        <div class="tag">
+          <span class="tag-dot" style="background:#ef6c00;"></span>
+          n8n compatible
+        </div>
+        <div class="tag" style="color:#4ade80;border-color:rgba(34,197,94,.25);">
+          npx n8m create "..."
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT — large logo mark -->
+    <div class="right">
+      <div class="mark-glow"></div>
+      <svg width="260" height="354" viewBox="0 0 22 30" fill="none" aria-hidden="true"
+           style="position:relative;filter:drop-shadow(0 0 40px rgba(34,197,94,.35));">
+        <rect x="0" y="0" width="22" height="30" rx="5" fill="#22c55e"/>
+        <rect x="3.5" y="3" width="15" height="10" rx="3" fill="#0b0d14"/>
+        <rect x="3.5" y="17" width="15" height="10" rx="3" fill="#0b0d14"/>
+      </svg>
+    </div>
+
+  </div>
+</body>
+</html>
