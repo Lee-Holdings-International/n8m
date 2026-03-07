@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>n8m — Agentic n8n Workflow Generator</title>
+  <meta name="description" content="Stop clicking. Start shipping. AI-powered CLI that generates, tests, and deploys n8n workflows from natural language. No account. No server. Bring your own AI key.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="n8m — Agentic n8n Workflow Generator">
+  <meta property="og:description" content="Stop clicking. Start shipping. Open-source CLI with an agentic AI layer for n8n. No account. No server. Bring your own AI key.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/Lee-Holdings-International/n8m/main/n8m-cover.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="n8m — Agentic n8n Workflow Generator">
+  <meta name="twitter:description" content="Stop clicking. Start shipping. AI-powered CLI for n8n.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/Lee-Holdings-International/n8m/main/n8m-cover.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+
+  <style>
+    /* ============================================================
+       RESET
+    ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ============================================================
+       BRAND TOKENS
+       Derived directly from n8m logo assets:
+         --brand      #22C55E  — logo green (primary)
+         --brand-hi   #4ADE80  — lighter green
+         --brand-dim  #16A34A  — deeper green
+         --indigo     #6366F1  — logo wordmark underline gradient
+         --indigo-hi  #818CF8
+         --bg-deep    #0B0D14  — logo background (near-black)
+    ============================================================ */
+    :root {
+      /* backgrounds */
+      --bg-deep:   #0b0d14;
+      --bg-main:   #0e1119;
+      --bg-raised: #111620;
+      --bg-card:   #121724;
+
+      /* borders */
+      --border:    #1a2035;
+      --border-hi: #283050;
+
+      /* brand — logo green */
+      --brand:     #22c55e;
+      --brand-hi:  #4ade80;
+      --brand-dim: #16a34a;
+      --brand-glow: rgba(34, 197, 94, .13);
+
+      /* indigo — logo wordmark underline */
+      --indigo:    #6366f1;
+      --indigo-hi: #818cf8;
+
+      /* semantic terminal */
+      --cyan:      #22d3ee;
+      --orange:    #fb923c;
+      --yellow:    #fcd34d;
+      --red:       #f87171;
+      --purple:    #a78bfa;
+
+      /* text */
+      --text:      #f1f5f9;
+      --text-2:    #cbd5e1;
+      --text-3:    #94a3b8;
+      --text-4:    #64748b;
+      --text-5:    #3d5070;
+
+      /* type */
+      --mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --body: 'IBM Plex Sans', system-ui, sans-serif;
+
+      --r:    10px;
+      --r-lg: 16px;
+      --mw:   1240px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg-deep);
+      color: var(--text);
+      font-family: var(--body);
+      line-height: 1.65;
+      overflow-x: hidden;
+    }
+
+    /* subtle dot grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+      background-size: 30px 30px;
+      opacity: .45;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body > * { position: relative; z-index: 1; }
+
+    a { color: inherit; text-decoration: none; }
+
+    code {
+      font-family: var(--mono);
+      font-size: .85em;
+      background: rgba(34, 197, 94, .07);
+      color: var(--brand-hi);
+      padding: .1em .35em;
+      border-radius: 4px;
+    }
+
+    /* ============================================================
+       NAV
+    ============================================================ */
+    nav {
+      position: fixed;
+      top: .875rem;
+      left: 50%;
+      transform: translateX(-50%);
+      width: calc(100% - 1.75rem);
+      max-width: var(--mw);
+      background: rgba(11, 13, 20, .85);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: .65rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 200;
+      transition: top .25s ease, width .25s ease, border-radius .25s ease,
+                  background .25s ease, border-color .25s ease, max-width .25s ease;
+    }
+
+    nav.scrolled {
+      top: 0;
+      width: 100%;
+      max-width: 100%;
+      border-radius: 0;
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      background: rgba(11, 13, 20, .96);
+    }
+
+    /* Logo mark: the "8" icon + wordmark */
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: .55rem;
+      font-family: var(--body);
+      font-weight: 700;
+      font-size: 1.05rem;
+      letter-spacing: -.01em;
+      color: var(--text);
+    }
+    .nav-logo .wordmark { letter-spacing: -.02em; }
+
+    /* inline "8" mark — faithful recreation of logo icon */
+    .logo-mark {
+      width: 22px;
+      height: 30px;
+      flex-shrink: 0;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: .15rem;
+    }
+    .nav-links a {
+      font-size: .82rem;
+      color: var(--text-3);
+      padding: .35rem .7rem;
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+      cursor: pointer;
+    }
+    .nav-links a:hover { color: var(--text); background: rgba(255,255,255,.05); }
+
+    .nav-cta {
+      background: var(--brand) !important;
+      color: #fff !important;
+      font-weight: 500;
+      padding: .35rem .9rem !important;
+    }
+    .nav-cta:hover { background: var(--brand-dim) !important; }
+
+    /* ============================================================
+       HERO
+    ============================================================ */
+    .hero-wrap {
+      max-width: var(--mw);
+      margin: 0 auto;
+      padding: 7.5rem 1.5rem 4rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 3.5rem;
+    }
+
+    /* hero glow — brand green */
+    .hero-wrap::before {
+      content: '';
+      position: absolute;
+      top: -60px;
+      right: -80px;
+      width: 680px;
+      height: 680px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(34,197,94,.07) 0%, transparent 65%);
+      pointer-events: none;
+    }
+
+    .hero-l { flex: 1; min-width: 0; }
+
+    /* badge */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .45rem;
+      background: rgba(34, 197, 94, .08);
+      border: 1px solid rgba(34, 197, 94, .25);
+      border-radius: 100px;
+      padding: .3rem .8rem;
+      font-family: var(--mono);
+      font-size: .73rem;
+      color: var(--brand-hi);
+      margin-bottom: 1.75rem;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .badge:hover { background: rgba(34, 197, 94, .14); }
+    .badge-pulse {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--brand);
+      animation: pulse 2.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* headline */
+    h1 {
+      font-family: var(--mono);
+      font-size: clamp(2.6rem, 5.5vw, 5.2rem);
+      font-weight: 700;
+      line-height: 1.04;
+      letter-spacing: -.045em;
+      margin-bottom: 1.4rem;
+      color: var(--text);
+    }
+    h1 em {
+      font-style: normal;
+      color: var(--brand-hi);
+      display: block;
+    }
+
+    .hero-sub {
+      font-size: 1.05rem;
+      color: var(--text-3);
+      line-height: 1.65;
+      max-width: 460px;
+      margin-bottom: 2.25rem;
+    }
+    .hero-sub strong { color: var(--text-2); font-weight: 500; }
+
+    /* install box */
+    .install-box {
+      display: inline-flex;
+      align-items: center;
+      gap: .6rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .65rem 1rem;
+      font-family: var(--mono);
+      font-size: .82rem;
+      margin-bottom: 1.75rem;
+      cursor: pointer;
+      user-select: all;
+      transition: border-color .15s;
+    }
+    .install-box:hover { border-color: var(--border-hi); }
+    .ip { color: var(--text-5); }
+    .ic { color: var(--cyan); }
+    .is { color: var(--yellow); }
+
+    .copy-btn {
+      font-family: var(--mono);
+      font-size: .7rem;
+      background: rgba(255,255,255,.06);
+      border: none;
+      border-radius: 4px;
+      padding: .2rem .5rem;
+      color: var(--text-4);
+      cursor: pointer;
+      transition: background .15s, color .15s;
+      margin-left: .2rem;
+    }
+    .copy-btn:hover { background: rgba(255,255,255,.12); color: var(--text); }
+    .copy-btn.ok { color: var(--brand-hi); }
+
+    /* cta buttons */
+    .hero-btns { display: flex; gap: .65rem; flex-wrap: wrap; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .45rem;
+      padding: .58rem 1.15rem;
+      border-radius: 8px;
+      font-size: .875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-pri { background: var(--brand); color: #fff; }
+    .btn-pri:hover { background: var(--brand-dim); }
+    .btn-sec {
+      background: rgba(255,255,255,.05);
+      color: var(--text-2);
+      border: 1px solid var(--border);
+    }
+    .btn-sec:hover { background: rgba(255,255,255,.09); border-color: var(--border-hi); color: var(--text); }
+
+    /* ============================================================
+       TERMINAL
+    ============================================================ */
+    .hero-r {
+      flex: 1;
+      min-width: 0;
+      max-width: 560px;
+    }
+
+    .terminal {
+      background: #070810;
+      border: 1px solid var(--border);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(34,197,94,.05),
+        0 0 60px rgba(34,197,94,.06),
+        0 24px 64px rgba(0,0,0,.6);
+    }
+
+    .term-bar {
+      background: var(--bg-raised);
+      padding: .8rem 1rem;
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .td { width: 12px; height: 12px; border-radius: 50%; }
+    .td-r { background: #ff5f56; }
+    .td-y { background: #ffbd2e; }
+    .td-g { background: #27c93f; }
+    .term-title {
+      margin: 0 auto;
+      font-family: var(--mono);
+      font-size: .7rem;
+      color: var(--text-5);
+    }
+
+    .term-body {
+      padding: 1.1rem 1.4rem 1.4rem;
+      font-family: var(--mono);
+      font-size: .775rem;
+      line-height: 1.85;
+      min-height: 310px;
+    }
+
+    /* terminal token colors */
+    .tp  { color: var(--text-5); }
+    .tc  { color: var(--cyan); }
+    .tb  { color: var(--brand-hi); }  /* commands — brand green */
+    .ts  { color: var(--yellow); }
+    .tl  { color: var(--orange); font-weight: 600; }
+    .tch { color: var(--brand); }     /* check marks — brand green */
+    .td2 { color: var(--text-4); }
+    .tok { color: var(--brand-hi); font-weight: 600; }
+    .tf  { color: var(--text-3); }
+
+    .term-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1.1em;
+      background: var(--brand);
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ============================================================
+       SECTIONS — COMMON
+    ============================================================ */
+    section { padding: 4.5rem 1.5rem; }
+    .inner { max-width: var(--mw); margin: 0 auto; }
+
+    hr.div {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0;
+    }
+
+    .sec-label {
+      font-family: var(--mono);
+      font-size: .7rem;
+      font-weight: 600;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--brand);
+      margin-bottom: .65rem;
+    }
+
+    h2 {
+      font-family: var(--mono);
+      font-size: clamp(1.65rem, 3vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: -.035em;
+      line-height: 1.1;
+      color: var(--text);
+      margin-bottom: .9rem;
+    }
+
+    .sec-sub {
+      font-size: 1rem;
+      color: var(--text-3);
+      max-width: 520px;
+      line-height: 1.65;
+      margin-bottom: 3rem;
+    }
+
+    /* ============================================================
+       PIPELINE
+    ============================================================ */
+    #how { background: var(--bg-main); }
+
+    .pipeline {
+      display: flex;
+      align-items: stretch;
+    }
+
+    .pnode {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 1.75rem 1.5rem;
+      transition: border-color .2s, box-shadow .2s;
+      cursor: default;
+    }
+    .pnode:hover {
+      border-color: var(--border-hi);
+      box-shadow: 0 0 28px var(--brand-glow);
+    }
+
+    .parr {
+      display: flex;
+      align-items: center;
+      padding: 0 .65rem;
+      color: var(--text-5);
+      flex-shrink: 0;
+    }
+    .parr svg { width: 22px; height: 22px; }
+
+    .pnum {
+      font-family: var(--mono);
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--brand);
+      margin-bottom: .4rem;
+    }
+    .pname {
+      font-family: var(--mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: .45rem;
+    }
+    .pdesc {
+      font-size: .825rem;
+      color: var(--text-3);
+      line-height: 1.55;
+    }
+
+    .picon {
+      width: 38px; height: 38px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: .9rem;
+    }
+    /* all pipeline icons use brand palette */
+    .pi-1 { background: rgba(34,197,94,.12);  color: var(--brand-hi); }
+    .pi-2 { background: rgba(34,211,238,.1);  color: var(--cyan); }
+    .pi-3 { background: rgba(99,102,241,.12); color: var(--indigo-hi); }
+    .pi-4 { background: rgba(251,146,60,.1);  color: var(--orange); }
+
+    /* ============================================================
+       COMMANDS
+    ============================================================ */
+    .cmds-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+      gap: .875rem;
+    }
+
+    .cmd-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 1.4rem;
+      transition: border-color .2s, box-shadow .2s, transform .2s;
+      cursor: default;
+    }
+    .cmd-card:hover {
+      border-color: rgba(34,197,94,.35);
+      box-shadow: 0 0 22px var(--brand-glow);
+      transform: translateY(-2px);
+    }
+
+    .cmd-hdr {
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+      margin-bottom: .65rem;
+    }
+    .cmd-ico {
+      width: 30px; height: 30px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .cmd-name {
+      font-family: var(--mono);
+      font-size: .95rem;
+      font-weight: 700;
+      color: var(--brand-hi);
+    }
+    .cmd-desc {
+      font-size: .82rem;
+      color: var(--text-3);
+      line-height: 1.55;
+      margin-bottom: .9rem;
+    }
+    .cmd-ex {
+      background: #060710;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: .65rem .9rem;
+      font-family: var(--mono);
+      font-size: .73rem;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+    .ep { color: var(--text-5); }
+    .ec { color: var(--brand-hi); }
+    .es { color: var(--cyan); }
+    .ef { color: var(--orange); }
+    .eq { color: var(--yellow); }
+    .em { color: var(--text-4); }
+
+    /* ============================================================
+       FEATURES
+    ============================================================ */
+    .feats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: .875rem;
+    }
+
+    .feat {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 1.4rem;
+      transition: border-color .2s;
+    }
+    .feat:hover { border-color: rgba(34,197,94,.3); }
+
+    .feat-ico {
+      width: 42px; height: 42px;
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: .9rem;
+    }
+    .feat-title {
+      font-family: var(--mono);
+      font-size: .875rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: .4rem;
+    }
+    .feat-desc { font-size: .82rem; color: var(--text-3); line-height: 1.55; }
+
+    /* ============================================================
+       PROVIDERS
+    ============================================================ */
+    #providers { background: var(--bg-main); }
+
+    .prov-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .65rem;
+      margin-bottom: 2rem;
+    }
+    .prov-pill {
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .55rem .9rem;
+      font-family: var(--mono);
+      font-size: .8rem;
+      color: var(--text-2);
+      cursor: default;
+      transition: border-color .15s;
+    }
+    .prov-pill:hover { border-color: var(--border-hi); }
+    .pdot { width: 8px; height: 8px; border-radius: 50%; }
+
+    .config-box {
+      background: #060710;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 1rem 1.25rem;
+      font-family: var(--mono);
+      font-size: .76rem;
+      line-height: 1.85;
+      max-width: 560px;
+    }
+
+    /* ============================================================
+       MCP
+    ============================================================ */
+    .mcp-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: start;
+    }
+
+    .check-list { display: flex; flex-direction: column; gap: .4rem; margin-bottom: 1.75rem; }
+    .check-item {
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+      font-size: .85rem;
+      color: var(--text-3);
+    }
+    .check-item svg { flex-shrink: 0; }
+
+    .json-box {
+      background: #060710;
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 1.1rem 1.25rem;
+      font-family: var(--mono);
+      font-size: .76rem;
+      line-height: 1.9;
+    }
+    .jk { color: var(--brand-hi); }
+    .jv { color: var(--yellow); }
+    .jp { color: var(--text-5); }
+    .jfile {
+      font-family: var(--mono);
+      font-size: .68rem;
+      color: var(--text-5);
+      margin-bottom: .4rem;
+    }
+
+    /* ============================================================
+       ROADMAP
+    ============================================================ */
+    #roadmap { background: var(--bg-main); }
+
+    .rm-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2.25rem;
+    }
+
+    .rm-head {
+      font-family: var(--mono);
+      font-size: .8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      padding-bottom: .7rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.1rem;
+    }
+
+    .rm-item {
+      display: flex;
+      align-items: flex-start;
+      gap: .65rem;
+      padding: .35rem 0;
+      font-size: .825rem;
+      color: var(--text-3);
+    }
+    .rm-item.done { color: var(--text-2); }
+    .rm-ck { flex-shrink: 0; margin-top: .18rem; }
+
+    /* ============================================================
+       SPONSORS
+    ============================================================ */
+    .sponsor-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: start;
+    }
+
+    .tier-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .875rem 1rem;
+      margin-bottom: .6rem;
+    }
+    .tier-card:last-child { margin-bottom: 0; }
+    .tier-name {
+      font-family: var(--mono);
+      font-size: .875rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: .2rem;
+    }
+    .tier-detail { font-size: .76rem; color: var(--text-4); }
+    .tier-price {
+      font-family: var(--mono);
+      font-size: .875rem;
+      font-weight: 600;
+    }
+
+    .current-sponsors {
+      margin-top: 1.25rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .875rem 1rem;
+    }
+    .cs-label {
+      font-size: .68rem;
+      color: var(--text-4);
+      text-transform: uppercase;
+      letter-spacing: .09em;
+      margin-bottom: .4rem;
+      font-family: var(--mono);
+    }
+
+    /* ============================================================
+       CTA
+    ============================================================ */
+    #cta {
+      text-align: center;
+      background: var(--bg-main);
+    }
+    #cta h2 { margin-bottom: .75rem; }
+    #cta .sec-sub { margin-left: auto; margin-right: auto; }
+
+    .cta-install {
+      display: inline-flex;
+      align-items: center;
+      gap: .65rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: .9rem 1.35rem;
+      font-family: var(--mono);
+      font-size: .95rem;
+      cursor: pointer;
+      transition: border-color .15s;
+      user-select: all;
+      margin-bottom: 1.75rem;
+    }
+    .cta-install:hover { border-color: rgba(34,197,94,.4); }
+
+    .cta-btns {
+      display: flex;
+      gap: .65rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    /* ============================================================
+       FOOTER
+    ============================================================ */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 1.75rem 1.5rem;
+      max-width: var(--mw);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: .45rem;
+      font-family: var(--body);
+      font-weight: 700;
+      font-size: .9rem;
+      color: var(--text-3);
+    }
+    .footer-links { display: flex; gap: 1.25rem; }
+    .footer-links a { font-size: .8rem; color: var(--text-4); transition: color .15s; }
+    .footer-links a:hover { color: var(--text-2); }
+    .footer-copy { font-size: .75rem; color: var(--text-5); }
+
+    /* ============================================================
+       RESPONSIVE
+    ============================================================ */
+    @media (max-width: 960px) {
+      .hero-wrap { flex-direction: column; padding-top: 5.5rem; }
+      .hero-r { max-width: 100%; }
+      .pipeline { flex-direction: column; }
+      .parr { transform: rotate(90deg); padding: .4rem 0; justify-content: center; }
+      .mcp-split, .rm-grid, .sponsor-split { grid-template-columns: 1fr; gap: 2rem; }
+    }
+
+    @media (max-width: 640px) {
+      h1 { font-size: 2.2rem; }
+      .cmds-grid, .feats-grid { grid-template-columns: 1fr; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      section { padding: 3.5rem 1.25rem; }
+    }
+
+    /* ============================================================
+       SCROLL REVEAL
+    ============================================================ */
+    @media (prefers-reduced-motion: no-preference) {
+      .reveal {
+        opacity: 0;
+        transform: translateY(18px);
+        transition: opacity .55s ease-out, transform .55s ease-out;
+      }
+      .reveal.visible { opacity: 1; transform: none; }
+      .reveal:nth-child(2) { transition-delay: .08s; }
+      .reveal:nth-child(3) { transition-delay: .16s; }
+      .reveal:nth-child(4) { transition-delay: .24s; }
+      .reveal:nth-child(5) { transition-delay: .32s; }
+      .reveal:nth-child(6) { transition-delay: .40s; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================
+     NAV
+============================================================ -->
+<nav>
+  <a class="nav-logo" href="#">
+    <!-- n8m logo mark: two-panel "8" icon, faithful to brand asset -->
+    <svg class="logo-mark" viewBox="0 0 22 30" fill="none" aria-hidden="true">
+      <rect x="0" y="0" width="22" height="30" rx="5" fill="#22c55e"/>
+      <rect x="3.5" y="3" width="15" height="10" rx="3" fill="#0b0d14"/>
+      <rect x="3.5" y="17" width="15" height="10" rx="3" fill="#0b0d14"/>
+    </svg>
+    <span class="wordmark">n8m</span>
+  </a>
+  <div class="nav-links">
+    <a href="#how">Pipeline</a>
+    <a href="#commands">Commands</a>
+    <a href="#mcp">MCP</a>
+    <a href="#roadmap">Roadmap</a>
+    <a href="https://github.com/Lee-Holdings-International/n8m" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://www.npmjs.com/package/@lhi/n8m" target="_blank" rel="noopener" class="nav-cta">npm</a>
+  </div>
+</nav>
+
+<!-- ============================================================
+     HERO
+============================================================ -->
+<div style="position:relative;overflow:hidden;">
+  <div class="hero-wrap">
+    <div class="hero-l">
+
+      <a class="badge"
+         href="https://github.com/Lee-Holdings-International/n8m/blob/main/README.md"
+         target="_blank" rel="noopener">
+        <span class="badge-pulse"></span>
+        New &middot; MCP Server &middot; Pattern Library &middot; Offline Fixtures
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <path d="M2 6h8M6 2l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </a>
+
+      <h1>Stop clicking.<em>Start shipping.</em></h1>
+
+      <p class="hero-sub">
+        <strong>n8m</strong> is an open-source CLI that wraps your n8n instance with an agentic AI layer.
+        Describe what you want in plain English &mdash; the agent designs, builds, validates, and deploys it.<br><br>
+        No account. No server. Bring your own AI key.
+      </p>
+
+      <div class="install-box" onclick="copy('npx n8m create &quot;your workflow&quot;','copyBtn')">
+        <span class="ip">$</span>
+        <span class="ic">npx</span>
+        <span style="color:var(--text-3);">&thinsp;n8m</span>
+        <span class="ec" style="color:var(--brand-hi);">&thinsp;create</span>
+        <span class="is">&thinsp;"your workflow"</span>
+        <button class="copy-btn" id="copyBtn" aria-label="Copy install command">copy</button>
+      </div>
+
+      <div class="hero-btns">
+        <a class="btn btn-pri" href="https://github.com/Lee-Holdings-International/n8m" target="_blank" rel="noopener">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          View on GitHub
+        </a>
+        <a class="btn btn-sec" href="https://www.npmjs.com/package/@lhi/n8m" target="_blank" rel="noopener">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M1.763 0C.786 0 0 .786 0 1.763v20.474C0 23.214.786 24 1.763 24h20.474C23.214 24 24 23.214 24 22.237V1.763C24 .786 23.214 0 22.237 0zM5.13 5.323l13.837.019-.009 13.836h-3.464l.01-10.382h-3.456L11.948 19.15H5.113z"/>
+          </svg>
+          npm
+        </a>
+        <a class="btn btn-sec" href="https://github.com/Lee-Holdings-International/n8m/blob/main/docs/DEVELOPER_GUIDE.md" target="_blank" rel="noopener">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          Dev Guide
+        </a>
+        <a class="btn btn-sec" href="https://github.com/Lee-Holdings-International/n8m/discussions" target="_blank" rel="noopener">Discussions</a>
+      </div>
+    </div>
+
+    <!-- TERMINAL -->
+    <div class="hero-r">
+      <div class="terminal" role="region" aria-label="n8m CLI demo">
+        <div class="term-bar">
+          <div class="td td-r" aria-hidden="true"></div>
+          <div class="td td-y" aria-hidden="true"></div>
+          <div class="td td-g" aria-hidden="true"></div>
+          <div class="term-title">n8m &mdash; terminal</div>
+        </div>
+        <div class="term-body" id="termBody" aria-live="polite">
+          <span class="term-cursor" id="cursor"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     HOW IT WORKS / PIPELINE
+============================================================ -->
+<section id="how">
+  <div class="inner">
+    <div class="sec-label">Architecture</div>
+    <h2>The agentic pipeline</h2>
+    <p class="sec-sub">Three specialized AI agents, each with a defined role. QA failures loop back to the Engineer automatically &mdash; up to three times before escalating.</p>
+
+    <div class="pipeline">
+
+      <div class="pnode reveal">
+        <div class="picon pi-1" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+            <polyline points="2 17 12 22 22 17"/>
+            <polyline points="2 12 12 17 22 12"/>
+          </svg>
+        </div>
+        <div class="pnum">Stage 01</div>
+        <div class="pname">Architect</div>
+        <p class="pdesc">Designs the workflow blueprint. Selects node types, defines execution flow, identifies required credentials, and consults the RAG-indexed pattern library.</p>
+      </div>
+
+      <div class="parr" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+
+      <div class="pnode reveal">
+        <div class="picon pi-2" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"/>
+            <polyline points="8 6 2 12 8 18"/>
+          </svg>
+        </div>
+        <div class="pnum">Stage 02</div>
+        <div class="pname">Engineer</div>
+        <p class="pdesc">Generates the complete n8n workflow JSON from the blueprint. Injects matched patterns from the project-local library to reproduce proven approaches exactly.</p>
+      </div>
+
+      <div class="parr" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+
+      <div class="pnode reveal">
+        <div class="picon pi-3" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </div>
+        <div class="pnum">Stage 03</div>
+        <div class="pname">QA</div>
+        <p class="pdesc">Validates the workflow against structural rules and n8n constraints. On failure, analyzes the error type, applies targeted fixes, and loops back to the Engineer.</p>
+      </div>
+
+      <div class="parr" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </div>
+
+      <div class="pnode reveal" style="border-color:rgba(34,197,94,.22);">
+        <div class="picon pi-4" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
+        <div class="pnum">Output</div>
+        <div class="pname">./workflows/</div>
+        <p class="pdesc" style="color:var(--brand-hi);">workflow.json<br>README.md (+ Mermaid diagram)</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ============================================================
+     COMMANDS
+============================================================ -->
+<section id="commands">
+  <div class="inner">
+    <div class="sec-label">CLI Reference</div>
+    <h2>Every command you need</h2>
+    <p class="sec-sub">The full workflow lifecycle &mdash; from first generation to production deployment.</p>
+
+    <div class="cmds-grid">
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(34,197,94,.12);color:var(--brand-hi);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </div>
+          <span class="cmd-name">n8m create</span>
+        </div>
+        <p class="cmd-desc">Generate a complete workflow from a plain-English description. The agentic pipeline handles design, build, and validation end-to-end.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">create</span> <span class="eq">"Slack DM on new GitHub PR"</span><br>
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">create</span> <span class="ef">--multiline</span><br>
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">create</span> <span class="eq">"..."</span> <span class="ef">--output</span> <span class="eq">./my-flow.json</span>
+        </div>
+      </div>
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(34,211,238,.1);color:var(--cyan);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </div>
+          <span class="cmd-name" style="color:var(--cyan);">n8m modify</span>
+        </div>
+        <p class="cmd-desc">Modify a local file or live n8n workflow using natural language. Interactively browse local files and remote instance workflows.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">modify</span> <span class="eq">./flow.json</span><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;<span class="eq">"Add error handling to HTTP node"</span>
+        </div>
+      </div>
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(99,102,241,.12);color:var(--indigo-hi);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+          <span class="cmd-name" style="color:var(--indigo-hi);">n8m test</span>
+        </div>
+        <p class="cmd-desc">Deploy ephemerally and validate. AI self-repair loop analyzes errors and applies targeted fixes automatically. Save fixtures for offline replay.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">test</span> <span class="ef">--ai-scenarios</span><br>
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">test</span> <span class="ef">--fixture</span> <span class="eq">.n8m/fixtures/abc</span>
+        </div>
+      </div>
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(251,146,60,.1);color:var(--orange);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <span class="cmd-name" style="color:var(--orange);">n8m deploy</span>
+        </div>
+        <p class="cmd-desc">Push a local workflow JSON to your n8n instance. CI-friendly non-interactive flags for create-or-update without prompts.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">deploy</span> <span class="eq">./flow.json</span> <span class="ef">--activate</span><br>
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">deploy</span> <span class="eq">./flow.json</span> <span class="ef">--update</span> <span class="em"># CI</span>
+        </div>
+      </div>
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(167,139,250,.12);color:var(--purple);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          </div>
+          <span class="cmd-name" style="color:var(--purple);">n8m learn</span>
+        </div>
+        <p class="cmd-desc">Extract reusable engineering patterns from validated workflows. Import community patterns from GitHub. Patterns feed directly into future Engineer prompts.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">learn</span> <span class="ef">--all</span><br>
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">learn</span> <span class="ef">--github</span> <span class="eq">owner/repo</span>
+        </div>
+      </div>
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(248,113,113,.1);color:var(--red);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
+          <span class="cmd-name" style="color:var(--red);">n8m fixture</span>
+        </div>
+        <p class="cmd-desc">Capture real execution data from n8n and replay it offline. No live instance, credentials, or external API calls needed for subsequent test runs.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">fixture</span> <span class="ef">capture</span> <span class="eq">abc123</span><br>
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">fixture</span> <span class="ef">init</span> <span class="eq">abc123</span>
+        </div>
+      </div>
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(252,211,77,.1);color:var(--yellow);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </div>
+          <span class="cmd-name" style="color:var(--yellow);">n8m doc</span>
+        </div>
+        <p class="cmd-desc">Generate visual documentation for any workflow. Outputs a Mermaid.js flowchart and AI-generated execution summary as README.md.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">doc</span> <span class="eq">./workflows/my-flow.json</span><br>
+          <span class="em"># &rarr; writes README.md + Mermaid diagram</span>
+        </div>
+      </div>
+
+      <div class="cmd-card reveal">
+        <div class="cmd-hdr">
+          <div class="cmd-ico" style="background:rgba(34,197,94,.1);color:var(--brand-hi);" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <span class="cmd-name">n8m mcp</span>
+        </div>
+        <p class="cmd-desc">Launch an MCP server exposing all n8m capabilities as tools for Claude Desktop, Cursor, Windsurf, and any MCP-compatible client.</p>
+        <div class="cmd-ex">
+          <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">mcp</span><br>
+          <span class="em"># &rarr; 8 tools available over stdio</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ============================================================
+     FEATURES
+============================================================ -->
+<section id="features">
+  <div class="inner">
+    <div class="sec-label">Why n8m</div>
+    <h2>Built for real automation work</h2>
+    <p class="sec-sub">Every design decision prioritizes local-first, no-lock-in, developer-grade workflows.</p>
+
+    <div class="feats-grid">
+
+      <div class="feat reveal">
+        <div class="feat-ico" style="background:rgba(34,197,94,.12);color:var(--brand-hi);" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>
+        <div class="feat-title">Local-first, zero lock-in</div>
+        <p class="feat-desc">Credentials and workflow files live on your machine. No cloud service, no account, no telemetry. Works entirely with your existing n8n instance.</p>
+      </div>
+
+      <div class="feat reveal">
+        <div class="feat-ico" style="background:rgba(99,102,241,.12);color:var(--indigo-hi);" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div class="feat-title">Self-healing test loop</div>
+        <p class="feat-desc">When tests fail, the AI repair loop identifies the error type, applies targeted fixes (Code nodes, payloads, binary fields), and retries — no human needed.</p>
+      </div>
+
+      <div class="feat reveal">
+        <div class="feat-ico" style="background:rgba(167,139,250,.12);color:var(--purple);" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </div>
+        <div class="feat-title">Self-improving pattern library</div>
+        <p class="feat-desc">Every validated workflow you <code>n8m learn</code> on enriches the library. Future generations automatically apply proven approaches to similar problems.</p>
+      </div>
+
+      <div class="feat reveal">
+        <div class="feat-ico" style="background:rgba(34,211,238,.1);color:var(--cyan);" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        </div>
+        <div class="feat-title">Offline fixture testing</div>
+        <p class="feat-desc">Capture real n8n execution data once, then replay it offline forever. Commit fixtures to your repo &mdash; your team runs the same tests without a live instance.</p>
+      </div>
+
+      <div class="feat reveal">
+        <div class="feat-ico" style="background:rgba(251,146,60,.1);color:var(--orange);" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+        </div>
+        <div class="feat-title">HITL pauses &amp; resume</div>
+        <p class="feat-desc">The agent pauses mid-run for human review. Sessions persist in SQLite &mdash; resume interrupted runs at any time with <code>n8m resume &lt;thread-id&gt;</code>.</p>
+      </div>
+
+      <div class="feat reveal">
+        <div class="feat-ico" style="background:rgba(252,211,77,.1);color:var(--yellow);" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+        </div>
+        <div class="feat-title">Bring any AI model</div>
+        <p class="feat-desc">Works with OpenAI, Claude, Gemini, Ollama, Groq, Together, or any OpenAI-compatible API endpoint. Switch providers with one <code>config</code> flag.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ============================================================
+     PROVIDERS
+============================================================ -->
+<section id="providers">
+  <div class="inner">
+    <div class="sec-label">AI Providers</div>
+    <h2>Bring your own AI</h2>
+    <p class="sec-sub">n8m is provider-agnostic. Configure once, works everywhere.</p>
+
+    <div class="prov-grid">
+      <div class="prov-pill"><span class="pdot" style="background:#74aa9c;"></span>OpenAI <span style="color:var(--text-5);font-size:.72rem;">gpt-4o</span></div>
+      <div class="prov-pill"><span class="pdot" style="background:#d4a373;"></span>Anthropic Claude <span style="color:var(--text-5);font-size:.72rem;">claude-sonnet-4-6</span></div>
+      <div class="prov-pill"><span class="pdot" style="background:#4285f4;"></span>Google Gemini <span style="color:var(--text-5);font-size:.72rem;">gemini-2.5-flash</span></div>
+      <div class="prov-pill"><span class="pdot" style="background:#a78bfa;"></span>Ollama <span style="color:var(--text-5);font-size:.72rem;">local / llama3</span></div>
+      <div class="prov-pill"><span class="pdot" style="background:#f59e0b;"></span>Groq <span style="color:var(--text-5);font-size:.72rem;">llama-3.3-70b</span></div>
+      <div class="prov-pill"><span class="pdot" style="background:var(--brand);"></span>Any OpenAI-compatible <span style="color:var(--text-5);font-size:.72rem;">--ai-base-url</span></div>
+    </div>
+
+    <div class="config-box">
+      <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">config</span> <span class="ef">--ai-provider</span> <span class="eq">anthropic</span> <span class="ef">--ai-key</span> <span class="eq">sk-ant-...</span><br>
+      <span class="ep">$</span> <span class="ec">n8m</span> <span class="es">config</span> <span class="ef">--n8n-url</span> <span class="eq">https://n8n.example.com</span> <span class="ef">--n8n-key</span> <span class="eq">...</span><br>
+      <span class="em"># credentials saved to ~/.n8m/config.json &mdash; persists across npx invocations</span>
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ============================================================
+     MCP
+============================================================ -->
+<section id="mcp">
+  <div class="inner">
+    <div class="mcp-split">
+
+      <div>
+        <div class="sec-label">MCP Server</div>
+        <h2>Use n8m inside Claude Desktop</h2>
+        <p class="sec-sub" style="margin-bottom:1.5rem;">n8m exposes 8 tools via the Model Context Protocol. Any MCP client can create, test, and deploy n8n workflows directly from a conversation.</p>
+
+        <div class="check-list">
+          <div class="check-item">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>create_workflow, modify_workflow, test_workflow</span>
+          </div>
+          <div class="check-item">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>deploy_workflow, get_workflow, list_workflows</span>
+          </div>
+          <div class="check-item">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>delete_workflow, generate_docs</span>
+          </div>
+        </div>
+
+        <a class="btn btn-pri" href="https://github.com/Lee-Holdings-International/n8m#n8m-mcp--launch-the-mcp-server" target="_blank" rel="noopener">MCP setup guide</a>
+      </div>
+
+      <div>
+        <div class="jfile">claude_desktop_config.json</div>
+        <div class="json-box"><span class="jp">{</span>
+  <span class="jk">"mcpServers"</span><span class="jp">: {</span>
+    <span class="jk">"n8m"</span><span class="jp">: {</span>
+      <span class="jk">"command"</span><span class="jp">: </span><span class="jv">"npx"</span><span class="jp">,</span>
+      <span class="jk">"args"</span><span class="jp">: [</span><span class="jv">"n8m"</span><span class="jp">,</span> <span class="jv">"mcp"</span><span class="jp">]</span>
+    <span class="jp">}</span>
+  <span class="jp">}</span>
+<span class="jp">}</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ============================================================
+     ROADMAP
+============================================================ -->
+<section id="roadmap">
+  <div class="inner">
+    <div class="sec-label">Roadmap</div>
+    <h2>What's shipped, what's next</h2>
+    <p class="sec-sub">n8m ships fast. Check GitHub for the latest.</p>
+
+    <div class="rm-grid">
+
+      <div>
+        <div class="rm-head" style="color:var(--brand);">Shipped</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Agentic graph (Architect &rarr; Engineer &rarr; QA)</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>SQLite session persistence</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>HITL interrupts and resume</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Sub-workflow dependency resolution in tests</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Multi-provider AI support (OpenAI, Claude, Gemini, Ollama&hellip;)</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Automatic documentation generation (Mermaid + summary)</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Fixture record &amp; replay &mdash; offline testing with real data</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Pattern library (extract &amp; reuse from validated workflows)</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>GitHub pattern archive import (<code>n8m learn --github</code>)</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>MCP server &mdash; 8 tools for full workflow lifecycle</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Non-interactive deploy flags (CI-ready)</div>
+        <div class="rm-item done"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Credential awareness &mdash; AI consults live instance</div>
+      </div>
+
+      <div>
+        <div class="rm-head" style="color:var(--text-3);">Coming Soon</div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span><strong style="color:var(--text-2);">n8m watch</strong> &mdash; file-system watcher with live reload</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span><strong style="color:var(--text-2);">n8m diff</strong> &mdash; structural diff between workflow versions</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span>Parallel test runs &mdash; multiple fixtures concurrently</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span><strong style="color:var(--text-2);">n8m debug</strong> &mdash; stream node-by-node output in real time</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span><strong style="color:var(--text-2);">n8m chat</strong> &mdash; interactive REPL with incremental AI edits</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span>Workflow linter &mdash; static analysis before deploy</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span>Multi-instance deploy &mdash; staging and production in one command</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span>Workflow marketplace &mdash; publish &amp; install community workflows</span></div>
+        <div class="rm-item"><svg class="rm-ck" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-5)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/></svg><span>LangGraph trace export &mdash; full agentic reasoning log</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ============================================================
+     SPONSORS
+============================================================ -->
+<section id="sponsors">
+  <div class="inner">
+    <div class="sponsor-split">
+
+      <div>
+        <div class="sec-label">Open Source</div>
+        <h2>MIT Licensed.<br>Free forever.</h2>
+        <p class="sec-sub" style="margin-bottom:1.5rem;">Sponsorship funds AI API costs, continued development, and keeping up with n8n's rapidly evolving node ecosystem.</p>
+        <div style="display:flex;gap:.65rem;flex-wrap:wrap;">
+          <a class="btn btn-pri" href="https://ko-fi.com/lcanady" target="_blank" rel="noopener">Ko-fi</a>
+          <a class="btn btn-sec" href="https://github.com/sponsors/lcanady" target="_blank" rel="noopener">GitHub Sponsors</a>
+        </div>
+      </div>
+
+      <div>
+        <div class="rm-head" style="color:var(--text-3);margin-bottom:1rem;">Sponsor Tiers</div>
+        <div class="tier-card">
+          <div><div class="tier-name">Supporter</div><div class="tier-detail">Name in README sponsors list</div></div>
+          <div class="tier-price" style="color:var(--brand);">$5/mo</div>
+        </div>
+        <div class="tier-card">
+          <div><div class="tier-name">Studio</div><div class="tier-detail">Logo in README + priority issue responses</div></div>
+          <div class="tier-price" style="color:var(--brand-hi);">$25/mo</div>
+        </div>
+        <div class="tier-card" style="border-color:rgba(34,197,94,.25);">
+          <div><div class="tier-name">Enterprise</div><div class="tier-detail">Logo + direct feature request line</div></div>
+          <div class="tier-price" style="color:var(--indigo-hi);">$100/mo</div>
+        </div>
+        <div class="current-sponsors">
+          <div class="cs-label">Current Sponsors</div>
+          <div style="font-size:.875rem;color:var(--text-2);">The Daily Caller</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ============================================================
+     CTA
+============================================================ -->
+<section id="cta">
+  <div class="inner">
+    <div class="sec-label">Get started</div>
+    <h2>Ready to stop clicking?</h2>
+    <p class="sec-sub">No account. No server. No lock-in. Just your n8n instance and an AI key.</p>
+
+    <div class="cta-install" onclick="copy('npx n8m create &quot;describe your workflow&quot;','copyBtnCta')">
+      <span style="color:var(--text-5);">$</span>
+      <span class="ic">npx</span>
+      <span style="color:var(--text-3);">&thinsp;n8m</span>
+      <span class="ec" style="color:var(--brand-hi);">&thinsp;create</span>
+      <span class="is">&thinsp;"describe your workflow"</span>
+      <button class="copy-btn" id="copyBtnCta" aria-label="Copy command">copy</button>
+    </div>
+
+    <div class="cta-btns">
+      <a class="btn btn-pri" href="https://github.com/Lee-Holdings-International/n8m" target="_blank" rel="noopener">View on GitHub</a>
+      <a class="btn btn-sec" href="https://www.npmjs.com/package/@lhi/n8m" target="_blank" rel="noopener">npm package</a>
+      <a class="btn btn-sec" href="https://github.com/Lee-Holdings-International/n8m/blob/main/docs/DEVELOPER_GUIDE.md" target="_blank" rel="noopener">Developer Guide</a>
+      <a class="btn btn-sec" href="https://github.com/Lee-Holdings-International/n8m/discussions" target="_blank" rel="noopener">Discussions</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     FOOTER
+============================================================ -->
+<footer>
+  <div class="footer-logo">
+    <svg width="18" height="24" viewBox="0 0 22 30" fill="none" aria-hidden="true">
+      <rect x="0" y="0" width="22" height="30" rx="5" fill="#22c55e"/>
+      <rect x="3.5" y="3" width="15" height="10" rx="3" fill="#0b0d14"/>
+      <rect x="3.5" y="17" width="15" height="10" rx="3" fill="#0b0d14"/>
+    </svg>
+    n8m
+  </div>
+  <div class="footer-links">
+    <a href="https://github.com/Lee-Holdings-International/n8m" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://www.npmjs.com/package/@lhi/n8m" target="_blank" rel="noopener">npm</a>
+    <a href="https://github.com/Lee-Holdings-International/n8m/blob/main/docs/DEVELOPER_GUIDE.md" target="_blank" rel="noopener">Docs</a>
+    <a href="https://github.com/Lee-Holdings-International/n8m/discussions" target="_blank" rel="noopener">Discussions</a>
+    <a href="https://github.com/Lee-Holdings-International/n8m/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+  </div>
+  <div class="footer-copy">&copy; 2026 Lee Holdings International &middot; Open Source</div>
+</footer>
+
+<!-- ============================================================
+     SCRIPTS
+============================================================ -->
+<script>
+  /* ── COPY ── */
+  function copy(text, btnId) {
+    const btn = document.getElementById(btnId);
+    const plain = text.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    navigator.clipboard.writeText(plain).then(() => {
+      btn.textContent = 'copied!';
+      btn.classList.add('ok');
+      setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('ok'); }, 2000);
+    });
+  }
+
+  /* ── TERMINAL ANIMATION ── */
+  const FRAMES = [
+    { chars: '$ n8m create "Send Slack DM on new GitHub PR"',
+      html:  '<span class="tp">$</span> <span class="tc">n8m</span> <span class="tb">create</span> <span class="ts">"Send Slack DM on new GitHub PR"</span>',
+      type: 'type', pause: 700 },
+    { html: '', type: 'blank', pause: 150 },
+    { html: '<span class="tl">  Architect</span>  <span class="td2">Analyzing requirements...</span>', type: 'line', pause: 550 },
+    { html: '<span class="tch">  ✓</span>  <span style="color:var(--text-2)">Blueprint ready</span> <span class="td2">· 4 nodes identified</span>', type: 'line', pause: 200 },
+    { html: '<span class="td2">       GitHub Webhook &rarr; Filter &rarr; Slack Message &rarr; Logger</span>', type: 'line', pause: 650 },
+    { html: '', type: 'blank', pause: 150 },
+    { html: '<span class="tl">  Engineer</span>    <span class="td2">Building workflow JSON...</span>', type: 'line', pause: 700 },
+    { html: '<span class="tch">  ✓</span>  <span style="color:var(--text-2)">Workflow generated</span> <span class="td2">· 143 lines</span>', type: 'line', pause: 650 },
+    { html: '', type: 'blank', pause: 150 },
+    { html: '<span class="tl">  QA</span>          <span class="td2">Validating structure...</span>', type: 'line', pause: 500 },
+    { html: '<span class="tch">  ✓</span>  <span style="color:var(--text-2)">All checks passed</span>', type: 'line', pause: 350 },
+    { html: '', type: 'blank', pause: 150 },
+    { html: '<span class="tok">  Saved</span> <span class="tf">./workflows/github-pr-slack/</span>', type: 'line', pause: 130 },
+    { html: '<span class="tf">    ├── workflow.json</span>', type: 'line', pause: 130 },
+    { html: '<span class="tf">    └── README.md</span>', type: 'line', pause: 3500 },
+  ];
+
+  const termBody = document.getElementById('termBody');
+  let running = false;
+
+  async function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  async function runTerminal() {
+    if (running) return;
+    running = true;
+
+    termBody.innerHTML = '';
+    const cursor = document.createElement('span');
+    cursor.className = 'term-cursor';
+    cursor.id = 'cursor';
+    termBody.appendChild(cursor);
+
+    for (const frame of FRAMES) {
+      const cur = document.getElementById('cursor');
+
+      if (frame.type === 'blank') {
+        termBody.insertBefore(document.createElement('br'), cur);
+        await sleep(frame.pause);
+        continue;
+      }
+
+      const span = document.createElement('span');
+
+      if (frame.type === 'type') {
+        termBody.insertBefore(span, cur);
+        termBody.insertBefore(document.createElement('br'), cur);
+        for (let i = 0; i <= frame.chars.length; i++) {
+          span.textContent = frame.chars.slice(0, i);
+          await sleep(i === 0 ? 0 : 30);
+        }
+        span.innerHTML = frame.html;
+      } else {
+        span.innerHTML = frame.html;
+        termBody.insertBefore(span, cur);
+        termBody.insertBefore(document.createElement('br'), cur);
+      }
+
+      await sleep(frame.pause);
+    }
+
+    running = false;
+    setTimeout(runTerminal, 2200);
+  }
+
+  /* start on scroll into view */
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    termBody.innerHTML = FRAMES
+      .filter(f => f.type !== 'blank')
+      .map(f => `<span>${f.html}</span><br>`)
+      .join('');
+  } else {
+    new IntersectionObserver((entries, obs) => {
+      if (entries[0].isIntersecting) { obs.disconnect(); runTerminal(); }
+    }, { threshold: 0.25 }).observe(termBody);
+  }
+
+  /* ── NAV SCROLL STATE ── */
+  const navEl = document.querySelector('nav');
+  window.addEventListener('scroll', () => {
+    navEl.classList.toggle('scrolled', window.scrollY > 60);
+  }, { passive: true });
+
+  /* ── SCROLL REVEAL ── */
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    new IntersectionObserver(entries => {
+      entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+    }, { threshold: 0.1 }).observe
+    ;
+    document.querySelectorAll('.reveal').forEach(el => {
+      new IntersectionObserver((entries, obs) => {
+        if (entries[0].isIntersecting) { el.classList.add('visible'); obs.disconnect(); }
+      }, { threshold: 0.1 }).observe(el);
+    });
+  } else {
+    document.querySelectorAll('.reveal').forEach(el => el.classList.add('visible'));
+  }
+</script>
+
+</body>
+</html>
