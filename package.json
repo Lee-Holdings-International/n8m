@@ -1,6 +1,6 @@
 {
   "name": "@lhi/n8m",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "Agentic n8n CLI wrapper - A Skill Bridge for n8n workflow automation",
   "author": "Lem Canady",
   "keywords": [
@@ -37,6 +37,7 @@
     "bin",
     "dist",
     "docs",
+    "banner.txt",
     "oclif.manifest.json"
   ],
   "dependencies": {
@@ -93,6 +94,7 @@
     "bin": "n8m",
     "dirname": "n8m",
     "commands": "./dist/commands",
+    "helpClass": "./dist/help.js",
     "plugins": [
       "@oclif/plugin-help",
       "@oclif/plugin-plugins"

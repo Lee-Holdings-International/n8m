@@ -30,6 +30,7 @@ export default class Fixture extends Command {
   ]
 
   async run(): Promise<void> {
+    this.log(theme.brand())
     const { args } = await this.parse(Fixture)
 
     if (args.action === 'init') {

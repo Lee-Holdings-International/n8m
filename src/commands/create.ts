@@ -83,9 +83,10 @@ export default class Create extends Command {
         description = description.slice(3, -3).trim();
     }
 
-    if (!description) {
+    if (!description || !description.trim()) {
         this.error('Description is required.');
     }
+    description = description.trim();
 
     // 2. AGENTIC EXECUTION
     const threadId = randomUUID();

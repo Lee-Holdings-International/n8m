@@ -162,9 +162,10 @@ export default class Modify extends Command {
         instruction = await promptMultiline('Describe the modifications you want to apply (use ``` for multiline): ');
     }
 
-    if (!instruction) {
+    if (!instruction || !instruction.trim()) {
         this.error('Modification instructions are required.');
     }
+    instruction = instruction.trim();
 
     // 4. AGENTIC EXECUTION
     const threadId = randomUUID();

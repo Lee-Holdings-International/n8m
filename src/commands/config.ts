@@ -37,12 +37,34 @@ export default class Config extends Command {
     }
 
     // Update config
-    if (flags['n8n-url']) config.n8nUrl = flags['n8n-url'];
+    if (flags['n8n-url']) {
+      try {
+        const parsed = new URL(flags['n8n-url']);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('bad protocol');
+      } catch {
+        this.error(`Invalid n8n URL: "${flags['n8n-url']}". Must be a valid http/https URL (e.g. https://your-n8n.example.com).`);
+      }
+      config.n8nUrl = flags['n8n-url'];
+    }
     if (flags['n8n-key']) config.n8nKey = flags['n8n-key'];
     if (flags['ai-key']) config.aiKey = flags['ai-key'];
-    if (flags['ai-provider']) config.aiProvider = flags['ai-provider'];
+    if (flags['ai-provider']) {
+      const KNOWN_PROVIDERS = ['openai', 'anthropic', 'gemini'];
+      if (!KNOWN_PROVIDERS.includes(flags['ai-provider'].toLowerCase())) {
+        this.error(`Unknown AI provider: "${flags['ai-provider']}". Must be one of: ${KNOWN_PROVIDERS.join(', ')}.`);
+      }
+      config.aiProvider = flags['ai-provider'].toLowerCase();
+    }
     if (flags['ai-model']) config.aiModel = flags['ai-model'];
-    if (flags['ai-base-url']) config.aiBaseUrl = flags['ai-base-url'];
+    if (flags['ai-base-url']) {
+      try {
+        const parsed = new URL(flags['ai-base-url']);
+        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('bad protocol');
+      } catch {
+        this.error(`Invalid AI base URL: "${flags['ai-base-url']}". Must be a valid http/https URL (e.g. http://localhost:11434/v1).`);
+      }
+      config.aiBaseUrl = flags['ai-base-url'];
+    }
 
     await ConfigManager.save(config);
     this.log(theme.done('Configuration updated successfully'));
