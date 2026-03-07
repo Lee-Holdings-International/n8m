@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/Users/kumakun/github/evenv/bin/pip install Pillow)",
+      "Bash(/Users/kumakun/github/evenv/bin/python3 -c \"from PIL import Image; print\\(''PIL ready''\\)\")",
+      "Bash(PYTHONPATH=/Users/kumakun/github/evenv/lib/python3.11/site-packages /Users/kumakun/github/evenv/bin/python3 -c \"from PIL import Image; print\\(''PIL ready''\\)\")"
+    ]
+  }
+}

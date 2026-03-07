@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="../n8m-logo-v2.png" alt="n8m" width="160" />
+</div>
+
 # n8m Developer Guide
 
 > A deep-dive into the internals of `n8m` for contributors and developers who

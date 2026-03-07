@@ -38,6 +38,10 @@
     "dist",
     "docs",
     "banner.txt",
+    "n8m-cover.png",
+    "n8m-logo-v2.png",
+    "n8m-logo-light.png",
+    "n8m-logo-mono.png",
     "oclif.manifest.json"
   ],
   "dependencies": {
