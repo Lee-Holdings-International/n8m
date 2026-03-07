@@ -526,13 +526,14 @@ npm run dev
 
 ## Roadmap
 
+### Shipped
+
 - [x] Agentic graph (Architect → Engineer → QA)
 - [x] SQLite session persistence
 - [x] HITL interrupts and resume
 - [x] Sub-workflow dependency resolution in tests
 - [x] Open source — no account required
-- [x] Multi-provider AI support (OpenAI, Claude, Gemini, Ollama, any
-      OpenAI-compatible API)
+- [x] Multi-provider AI support (OpenAI, Claude, Gemini, Ollama, any OpenAI-compatible API)
 - [x] Automatic documentation generation (Mermaid + AI Summary)
 - [x] Project-based folder organization
 - [x] AI-driven test scenario generation (`--ai-scenarios`)
@@ -543,5 +544,27 @@ npm run dev
 - [x] Pattern library — extract & reuse knowledge from validated workflows (`n8m learn`)
 - [x] GitHub pattern archive import (`n8m learn --github owner/repo`)
 - [x] MCP server — expose n8m as tools for Claude Desktop and other MCP clients
-- [ ] Native n8n canvas integration
-- [ ] Multi-agent collaboration on a single goal
+
+### Near-term
+
+- [ ] **`n8m watch`** — file-system watcher that auto-deploys on save with live reload in the n8n editor
+- [ ] **`n8m diff`** — human-readable structural diff between two versions of a workflow (nodes added/removed/changed)
+- [ ] **`n8m rollback`** — restore a workflow to a previous git-tracked version with a single command
+- [ ] **Credential awareness** — AI consults available credential types on the target instance so it stops generating nodes it can't authenticate
+- [ ] **Parallel test runs** — fire multiple fixture payloads concurrently and report aggregate pass/fail
+
+### Medium-term
+
+- [ ] **`n8m debug`** — attach to a running execution and stream node-by-node output to the terminal in real time
+- [ ] **`n8m chat`** — interactive REPL where every message applies an incremental AI edit and immediately re-tests
+- [ ] **Workflow linter** — static analysis before deploy: dead branches, missing error handlers, unconnected nodes, credential gaps
+- [ ] **`n8m learn --from-executions`** — scrape recent successful executions and distil reusable patterns into `.n8m/patterns/` automatically
+- [ ] **Multi-instance deploy** — deploy the same workflow to staging and production in one command with environment-variable substitution
+
+### Longer-term
+
+- [ ] **Visual diff** — `n8m diff --ui` opens a side-by-side workflow comparison in the n8n canvas
+- [ ] **Workflow marketplace** — `n8m publish` / `n8m install <slug>` to share and consume community patterns with version pinning
+- [ ] **Execution replay** — record a live execution and automatically promote it to a fixture, closing the capture loop entirely
+- [ ] **Agent memory across sessions** — the engineer remembers which node patterns worked well for a given integration and prefers them on future builds
+- [ ] **LangGraph trace export** — export the full agentic reasoning trace (Architect → Engineer → Reviewer → QA) as a structured log for debugging and auditing
