@@ -1,6 +1,6 @@
 {
   "name": "@lhi/n8m",
-  "version": "0.3.3",
+  "version": "1.0.0",
   "description": "Agentic n8n CLI wrapper - A Skill Bridge for n8n workflow automation",
   "author": "Lem Canady",
   "keywords": [
@@ -40,6 +40,10 @@
     "oclif.manifest.json"
   ],
   "dependencies": {
+    "@inquirer/checkbox": "^4.0.0",
+    "@inquirer/confirm": "^5.0.0",
+    "@inquirer/input": "^4.0.0",
+    "@inquirer/select": "^4.0.0",
     "@langchain/core": "^1.1.18",
     "@langchain/langgraph": "^1.1.2",
     "@langchain/langgraph-checkpoint-sqlite": "^1.0.0",

@@ -25,7 +25,12 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Publish
+      - name: Publish scoped (@lhi/n8m)
         run: npm publish --access=public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish unscoped (n8m)
+        run: npm pkg set name=n8m && npm publish --access=public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

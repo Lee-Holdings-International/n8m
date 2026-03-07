@@ -47,25 +47,31 @@ n8m/
 │   │   ├── fixture.ts        # capture/init sub-commands for offline fixtures
 │   │   ├── learn.ts          # extract pattern knowledge from validated workflows
 │   │   ├── mcp.ts            # MCP server entry point
+│   │   ├── rollback.ts       # restore workflow to a previous git-tracked version
 │   │   ├── resume.ts
 │   │   ├── prune.ts
 │   │   └── config.ts
 │   ├── services/             # Core business logic services
 │   │   ├── ai.service.ts     # LLM abstraction layer
 │   │   ├── doc.service.ts    # Documentation generation
+│   │   ├── git.service.ts    # Git operations (history, diff, file-at-commit)
 │   │   ├── n8n.service.ts    # n8n API helpers
 │   │   ├── mcp.service.ts    # MCP server integration
 │   │   └── node-definitions.service.ts  # RAG for n8n node schemas
 │   ├── utils/
 │   │   ├── n8nClient.ts      # n8n REST API client
-│   │   ├── config.ts         # Config file management
+│   │   ├── config.ts         # Config file management (~/.n8m/config.json)
 │   │   ├── theme.ts          # CLI formatting/theming
+│   │   ├── spinner.ts        # Ora spinner wrapper
+│   │   ├── multilinePrompt.tsx  # Ink-based multiline input component
 │   │   ├── fixtureManager.ts # Read/write .n8m/fixtures/ (single-file + directory)
 │   │   └── sandbox.ts        # Isolated script runner for custom QA tools
 │   └── resources/
 │       └── node-definitions-fallback.json  # Static node schema fallback
 ├── docs/
-│   └── N8N_NODE_REFERENCE.md # Human-readable node reference (for LLM context)
+│   ├── DEVELOPER_GUIDE.md    # This file
+│   ├── N8N_NODE_REFERENCE.md # Human-readable node reference (for LLM context)
+│   └── patterns/             # AI-generated reusable workflow patterns
 ├── test/                     # Mocha unit tests
 └── workflows/                # Local workflow project folders
     └── <slug>/

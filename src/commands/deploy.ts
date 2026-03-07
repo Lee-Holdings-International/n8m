@@ -72,6 +72,14 @@ export default class Deploy extends Command {
       char: 'd',
       description: 'Directory to scan for workflows (default: ./workflows)',
     }),
+    update: Flags.boolean({
+      description: 'Update existing workflow without prompting (non-interactive)',
+      default: false,
+    }),
+    'force-create': Flags.boolean({
+      description: 'Always create as a new workflow, ignoring any existing ID (non-interactive)',
+      default: false,
+    }),
   }
 
   async run(): Promise<void> {
@@ -153,14 +161,21 @@ export default class Deploy extends Command {
         }
 
         if (existsRemotely) {
-          const { default: select } = await import('@inquirer/select');
-          const action = await select({
-            message: `Workflow "${workflowData.name}" already exists in n8n (ID: ${workflowData.id}). What would you like to do?`,
-            choices: [
-              { name: 'Update existing workflow', value: 'update' },
-              { name: 'Create as new workflow', value: 'create' },
-            ],
-          });
+          let action: 'update' | 'create';
+          if (flags.update) {
+            action = 'update';
+          } else if (flags['force-create']) {
+            action = 'create';
+          } else {
+            const { default: select } = await import('@inquirer/select');
+            action = await select({
+              message: `Workflow "${workflowData.name}" already exists in n8n (ID: ${workflowData.id}). What would you like to do?`,
+              choices: [
+                { name: 'Update existing workflow', value: 'update' },
+                { name: 'Create as new workflow', value: 'create' },
+              ],
+            }) as 'update' | 'create';
+          }
 
           if (action === 'update') {
             await client.updateWorkflow(workflowData.id, workflowData);

@@ -52,8 +52,8 @@ npx n8m config --ai-provider gemini --ai-key AIza...
 npx n8m config --ai-base-url http://localhost:11434/v1 --ai-key ollama --ai-model llama3
 ```
 
-You can also use environment variables or a `.env` file — env vars take priority
-over stored config:
+You can also use environment variables or a `.env` file — stored config takes
+priority; env vars are used as fallback when no config file value is set:
 
 | Variable      | Description                                              |
 | ------------- | -------------------------------------------------------- |
@@ -287,6 +287,12 @@ n8m deploy ./workflows/my-flow.json
 
 # Activate the workflow immediately after deployment
 n8m deploy ./workflows/my-flow.json --activate
+
+# Non-interactive: always update the existing workflow (useful in CI)
+n8m deploy ./workflows/my-flow.json --update
+
+# Non-interactive: always create a new workflow, ignoring any existing ID
+n8m deploy ./workflows/my-flow.json --force-create
 ```
 
 ---
@@ -380,12 +386,18 @@ n8m mcp
 # → Starting n8m MCP Server...
 ```
 
-The server runs over stdio and registers two tools:
+The server runs over stdio and registers the following tools:
 
 | Tool | Description |
 |---|---|
 | `create_workflow` | Generate an n8n workflow from a natural-language goal |
+| `modify_workflow` | Modify an existing workflow JSON using natural language instructions |
 | `test_workflow` | Deploy a workflow ephemerally to n8n and validate it |
+| `deploy_workflow` | Create or update a workflow on the configured n8n instance |
+| `get_workflow` | Fetch a workflow from n8n by ID |
+| `list_workflows` | List all workflows on the n8n instance |
+| `delete_workflow` | Delete a workflow from n8n by ID |
+| `generate_docs` | Generate a Mermaid diagram and README for a workflow JSON |
 
 Add it to your MCP client config (e.g. Claude Desktop's `claude_desktop_config.json`):
 
@@ -509,7 +521,7 @@ Developer → n8m learn <workflow.json>
 ## Local Development
 
 ```bash
-git clone https://github.com/lcanady/n8m.git
+git clone https://github.com/Lee-Holdings-International/n8m.git
 cd n8m
 npm install
 
@@ -552,7 +564,7 @@ evolving node ecosystem.
 
 ### Shipped
 
-- [x] Agentic graph (Architect → Engineer → QA)
+- [x] Agentic graph (Architect → Engineer → Supervisor → Reviewer → QA)
 - [x] SQLite session persistence
 - [x] HITL interrupts and resume
 - [x] Sub-workflow dependency resolution in tests
@@ -570,6 +582,8 @@ evolving node ecosystem.
 - [x] MCP server — expose n8m as tools for Claude Desktop and other MCP clients
 - [x] **`n8m rollback`** — restore a workflow to a previous git-tracked version with a single command
 - [x] **Credential awareness** — AI consults available credential types on the target instance so it stops generating nodes it can't authenticate
+- [x] **MCP server expanded to 8 tools** — full workflow lifecycle from any MCP client: create, modify, test, deploy, get, list, delete, generate docs
+- [x] **Non-interactive deploy flags** — `--update` and `--force-create` for CI/scripted use without interactive prompts
 
 ### Near-term
 

@@ -2,7 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-03-06
+## [1.0.0] - 2026-03-07
+
+### Added
+- MCP server expanded from 2 tools to 8: `create_workflow`, `modify_workflow`, `test_workflow`, `deploy_workflow`, `get_workflow`, `list_workflows`, `delete_workflow`, `generate_docs`
+- `n8m deploy --update` flag — update an existing workflow without prompting (CI-friendly)
+- `n8m deploy --force-create` flag — always create a new workflow, ignoring any existing ID
+- `@inquirer/checkbox`, `@inquirer/confirm`, `@inquirer/input`, `@inquirer/select` added as explicit dependencies
+
+### Fixed
+- `dotenv.config()` moved from `ConfigManager.load()` to module-level init — it now runs once at startup instead of on every config read, preventing leaked env var re-injection in tests and CI
+
+### Changed
+- npm publish CI now releases both `@lhi/n8m` (scoped) and `n8m` (unscoped) in the same workflow run, keeping both in sync
+
+### Tests
+- 31 new test assertions across three new test files: `doc.service.test.ts`, `deploy.test.ts`, `mcp.service.test.ts` (306 total, all passing)
+
+---
+
+## [0.3.4] - 2026-03-06
 
 ### Added
 - **`n8m rollback`** — new command to restore a workflow file to any previous git-tracked version. Presents an interactive commit history, shows a node-level diff preview, confirms before writing, and optionally redeploys to n8n (`--deploy`).
