@@ -1,0 +1,33 @@
+title: "[Show] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Built something cool with n8m? Share it here — workflows, integrations, use cases, or anything else worth showing off.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What did you build?
+      description: Describe the workflow or project.
+    validations:
+      required: true
+
+  - type: textarea
+    id: how
+    attributes:
+      label: How n8m helped
+      description: Which commands did you use? Any interesting patterns or techniques?
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow JSON or pattern (optional)
+      description: Paste a sanitized workflow JSON or `.n8m/patterns/` file if you'd like to share it.
+      render: json
+
+  - type: input
+    id: link
+    attributes:
+      label: Link (optional)
+      description: Repo, blog post, or demo URL.

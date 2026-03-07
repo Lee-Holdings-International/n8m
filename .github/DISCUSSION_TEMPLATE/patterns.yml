@@ -1,0 +1,38 @@
+title: "[Pattern] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share a reusable `.n8m/patterns/` file, discuss an existing built-in pattern, or propose improvements to how n8m teaches the AI.
+
+        Pattern file format reference: [docs/patterns/bigquery-via-http.md](https://github.com/Lee-Holdings-International/n8m/blob/main/docs/patterns/bigquery-via-http.md)
+
+  - type: input
+    id: title
+    attributes:
+      label: Pattern name
+      placeholder: "e.g. Stripe webhook → Airtable"
+    validations:
+      required: true
+
+  - type: textarea
+    id: keywords
+    attributes:
+      label: Keywords
+      description: Comma-separated keywords the engineer should use to find this pattern.
+      placeholder: "stripe, webhook, airtable, payment, event"
+    validations:
+      required: true
+
+  - type: textarea
+    id: pattern
+    attributes:
+      label: Pattern content
+      description: The full Markdown content of the pattern file (include the `<!-- keywords: ... -->` header).
+      render: markdown
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / discussion
+      description: Gotchas, alternatives, or anything else worth discussing about this pattern.

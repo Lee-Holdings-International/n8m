@@ -1,0 +1,39 @@
+title: "[Idea] "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea that's not quite ready for a formal feature request? Share it here and let the community weigh in before it becomes an issue.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the friction or gap you're experiencing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would you like n8m to do? Include example CLI commands if you have them.
+      placeholder: |
+        n8m watch ./workflows/my-flow.json
+        # → auto-deploys on save
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Other ways to solve this, workarounds you're using today, etc.
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to open a PR for this if the idea is accepted

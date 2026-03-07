@@ -1,0 +1,45 @@
+title: "[Q&A] "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask anything about using n8m. Check the [README](https://github.com/Lee-Holdings-International/n8m#readme) and [open discussions](https://github.com/Lee-Holdings-International/n8m/discussions) first — your question may already be answered.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to do, and what's blocking you?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What you've tried
+      description: Commands run, errors seen, relevant config (redact any API keys).
+      render: shell
+
+  - type: dropdown
+    id: command
+    attributes:
+      label: Which command is this about?
+      options:
+        - n8m create
+        - n8m modify
+        - n8m test
+        - n8m fixture
+        - n8m learn
+        - n8m deploy
+        - n8m mcp
+        - n8m config
+        - General / other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: n8m version
+      placeholder: "e.g. 0.3.3  (run: npx n8m --version)"

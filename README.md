@@ -10,6 +10,8 @@
 [![oclif](https://badgen.net/badge/CLI/oclif/purple)](https://oclif.io/)
 [![n8n](https://badgen.net/badge/n8n/Compatible/orange)](https://n8n.io)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?logo=github)](https://github.com/Lee-Holdings-International/n8m#sponsors)
+[![Discussions](https://img.shields.io/badge/Discussions-Join-blue?logo=github)](https://github.com/Lee-Holdings-International/n8m/discussions)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
 **Stop clicking. Start shipping.** `n8m` is an open-source CLI that wraps your
 n8n instance with an agentic AI layer. Describe what you want in plain English —
