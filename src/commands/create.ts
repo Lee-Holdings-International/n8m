@@ -90,11 +90,26 @@ export default class Create extends Command {
     // 2. AGENTIC EXECUTION
     const threadId = randomUUID();
     this.log(theme.info(`\nInitializing Agentic Workflow for: "${description}" (Session: ${threadId})`));
-    
+
+    // Fetch available credentials for AI guidance (gracefully skipped if n8n not configured)
+    let availableCredentials: any[] = [];
+    {
+      const preConfig = await ConfigManager.load();
+      const preUrl = process.env.N8N_API_URL || preConfig.n8nUrl;
+      const preKey = process.env.N8N_API_KEY || preConfig.n8nKey;
+      if (preUrl && preKey) {
+        const preClient = new N8nClient({ apiUrl: preUrl, apiKey: preKey });
+        availableCredentials = await preClient.getCredentials();
+        if (availableCredentials.length > 0) {
+          this.log(theme.muted(`  Found ${availableCredentials.length} credential(s) on n8n instance — AI will use these for node selection.`));
+        }
+      }
+    }
+
     let lastWorkflowJson: any = null;
-    
+
     try {
-        const stream = await runAgenticWorkflowStream(description, threadId);
+        const stream = await runAgenticWorkflowStream(description, threadId, { availableCredentials });
         
         for await (const event of stream) {
             // event keys correspond to node names that just finished

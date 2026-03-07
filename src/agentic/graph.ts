@@ -91,12 +91,17 @@ export const runAgenticWorkflow = async (goal: string, initialState: Partial<typ
  * @param goal The user's goal string
  * @returns AsyncIterable for events
  */
-export const runAgenticWorkflowStream = async (goal: string, threadId: string = "default_session") => {
+export const runAgenticWorkflowStream = async (
+  goal: string,
+  threadId: string = "default_session",
+  initialState: Partial<typeof TeamState.State> = {}
+) => {
     return await graph.stream({
         userGoal: goal,
         messages: [],
         validationErrors: [],
         revisionCount: 0,
+        ...initialState,
     }, {
         configurable: { thread_id: threadId }
     });

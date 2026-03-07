@@ -4,6 +4,12 @@ export interface N8nClientConfig {
   apiKey?: string
 }
 
+export interface N8nCredential {
+  id: string
+  name: string
+  type: string
+}
+
 export interface WorkflowExecutionResult {
   executionId: string
   finished: boolean
@@ -329,6 +335,48 @@ export class N8nClient {
       return all;
     } catch (error) {
       console.warn(`[N8nClient] Failed to fetch node types: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get all credentials configured on the n8n instance.
+   * Returns [] gracefully on 401/403/network errors so missing permissions
+   * never block workflow generation.
+   */
+  async getCredentials(): Promise<N8nCredential[]> {
+    try {
+      let all: N8nCredential[] = [];
+      let cursor: string | undefined = undefined;
+
+      do {
+        const url = new URL(`${this.apiUrl}/credentials`);
+        if (cursor) url.searchParams.set('cursor', cursor);
+
+        const response = await fetch(url.toString(), {
+          headers: this.headers,
+          method: 'GET',
+        });
+
+        if (!response.ok) {
+          return [];
+        }
+
+        const result = await response.json();
+
+        if (Array.isArray(result)) {
+          all = [...all, ...result];
+          cursor = undefined;
+        } else if (result.data && Array.isArray(result.data)) {
+          all = [...all, ...result.data];
+          cursor = result.nextCursor ?? undefined;
+        } else {
+          break;
+        }
+      } while (cursor);
+
+      return all.map((c: any) => ({ id: String(c.id), name: String(c.name), type: String(c.type) }));
+    } catch {
       return [];
     }
   }

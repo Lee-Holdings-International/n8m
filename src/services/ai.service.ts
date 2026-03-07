@@ -6,6 +6,25 @@ import { fileURLToPath } from 'url';
 import { jsonrepair } from 'jsonrepair';
 import { NodeDefinitionsService } from './node-definitions.service.js';
 import { Spinner } from '../utils/spinner.js';
+import type { N8nCredential } from '../utils/n8nClient.js';
+
+/**
+ * Build a credential-awareness section for AI prompts.
+ * Returns an empty string when no credentials are provided so
+ * offline / unconfigured usage is completely unaffected.
+ */
+export function buildCredentialContext(credentials: N8nCredential[] | null | undefined): string {
+  if (!credentials || credentials.length === 0) return '';
+
+  const list = credentials.map(c => `- "${c.name}" (type: ${c.type})`).join('\n');
+  return `
+
+AVAILABLE CREDENTIALS ON TARGET INSTANCE:
+${list}
+
+IMPORTANT: Only generate nodes whose credential type matches one of the types listed above.
+If the goal requires a service not in this list, use the HTTP Request node with generic authentication instead of a dedicated service node.`;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -222,15 +241,17 @@ export class AIService {
   public getDefaultModel(): string { return this.model; }
   public getDefaultProvider(): string { return this.defaultProvider; }
 
-  async generateSpec(goal: string): Promise<WorkflowSpec> {
+  async generateSpec(goal: string, availableCredentials: N8nCredential[] = []): Promise<WorkflowSpec> {
     const nodeService = NodeDefinitionsService.getInstance();
     const staticRef = nodeService.getStaticReference();
+    const credentialContext = buildCredentialContext(availableCredentials);
 
     const prompt = `You are an n8n Solution Architect.
        Create a technical specification for an n8n workflow that fulfills the following goal: "${goal}".
-       
+
        [N8N NODE REFERENCE GUIDE]
        ${staticRef}
+       ${credentialContext}
 
        Your output must be a JSON object with this structure:
        {
@@ -241,7 +262,7 @@ export class AIService {
          ],
          "questions": ["Any clarification questions for the user"]
        }
-       
+
        Use ONLY standard n8n node types (e.g. n8n-nodes-base.httpRequest, n8n-nodes-base.slack).
        Output ONLY the JSON object. No commentary.`;
 
@@ -310,16 +331,18 @@ Output ONLY valid JSON. No markdown.`;
     }
   }
 
-  async generateAlternativeSpec(goal: string, primarySpec: WorkflowSpec): Promise<WorkflowSpec> {
+  async generateAlternativeSpec(goal: string, primarySpec: WorkflowSpec, availableCredentials: N8nCredential[] = []): Promise<WorkflowSpec> {
     const nodeService = NodeDefinitionsService.getInstance();
     const staticRef = nodeService.getStaticReference();
+    const credentialContext = buildCredentialContext(availableCredentials);
 
-    const prompt = `You are a Senior n8n Engineer. 
+    const prompt = `You are a Senior n8n Engineer.
        Given the goal: "${goal}" and a primary strategy: ${JSON.stringify(primarySpec)},
        design an ALTERNATIVE strategy (different approach or set of nodes) that achieves the same goal.
-       
+
        [N8N NODE REFERENCE GUIDE]
        ${staticRef}
+       ${credentialContext}
 
        Your output must be a JSON object with the same WorkflowSpec structure.
        Output ONLY the JSON object. No commentary.`;

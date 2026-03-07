@@ -568,13 +568,13 @@ evolving node ecosystem.
 - [x] Pattern library — extract & reuse knowledge from validated workflows (`n8m learn`)
 - [x] GitHub pattern archive import (`n8m learn --github owner/repo`)
 - [x] MCP server — expose n8m as tools for Claude Desktop and other MCP clients
+- [x] **`n8m rollback`** — restore a workflow to a previous git-tracked version with a single command
+- [x] **Credential awareness** — AI consults available credential types on the target instance so it stops generating nodes it can't authenticate
 
 ### Near-term
 
 - [ ] **`n8m watch`** — file-system watcher that auto-deploys on save with live reload in the n8n editor
-- [ ] **`n8m diff`** — human-readable structural diff between two versions of a workflow (nodes added/removed/changed)
-- [ ] **`n8m rollback`** — restore a workflow to a previous git-tracked version with a single command
-- [ ] **Credential awareness** — AI consults available credential types on the target instance so it stops generating nodes it can't authenticate
+- [ ] **`n8m diff`** — human-readable structural diff between two workflow versions (nodes added/removed/changed)
 - [ ] **Parallel test runs** — fire multiple fixture payloads concurrently and report aggregate pass/fail
 
 ### Medium-term

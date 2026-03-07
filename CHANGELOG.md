@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased] - 2026-03-06
 
 ### Added
+- **`n8m rollback`** — new command to restore a workflow file to any previous git-tracked version. Presents an interactive commit history, shows a node-level diff preview, confirms before writing, and optionally redeploys to n8n (`--deploy`).
+- **Credential awareness** — before generating, `n8m create` and `n8m modify` now fetch the credential types configured on the target n8n instance (`GET /api/v1/credentials`) and pass them to every AI agent (Architect, Engineer). The AI is instructed to only plan nodes whose credential type is available; unlisted services fall back to HTTP Request. Gracefully skipped when n8n is not configured or the API key lacks credentials permissions.
+- `N8nClient.getCredentials()` — new paginated method returning `{ id, name, type }[]`; returns `[]` on 401/403/network errors so missing permissions never block workflow generation.
+- `buildCredentialContext()` — exported pure function that renders the credential section injected into Architect and Engineer prompts; returns `""` for empty/null input preserving offline behaviour.
+- `GitService` — new service (`src/services/git.service.ts`) wrapping git operations: `isGitRepo()`, `getRepoRoot()`, `getRelativePath()`, `getFileHistory()`, `getFileAtCommit()`.
+- `diffWorkflowNodes()` and `formatCommitChoice()` — exported pure helpers for diff preview and commit display formatting.
+- `availableCredentials` field added to `TeamState` LangGraph state; `runAgenticWorkflowStream()` accepts an `initialState` spread so callers can inject it at graph start.
+
+### Tests
+- 100 new test assertions across four new test files: `n8n-client.credentials.test.ts`, `credential-context.test.ts`, `git.service.test.ts`, `rollback.test.ts` (275 total, all passing).
+
+---
+
+## [0.3.3] - 2026-03-06
+
+### Fixed
+- Updated import path for checkbox from `inquirer` to `@inquirer/checkbox`
+
+---
+
+## [0.3.2] - 2026-03-06
+
+### Added
 - Pattern search functionality and AI pattern generation (`learn` command, `searchPatterns`, BigQuery HTTP pattern doc)
 
 ---

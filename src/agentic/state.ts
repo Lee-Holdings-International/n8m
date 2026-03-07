@@ -1,5 +1,6 @@
 import { BaseMessage } from "@langchain/core/messages";
 import { Annotation } from "@langchain/langgraph";
+import type { N8nCredential } from '../utils/n8nClient.js';
 
 export const TeamState = Annotation.Root({
   userGoal: Annotation<string>,
@@ -14,6 +15,10 @@ export const TeamState = Annotation.Root({
   validationStatus: Annotation<'passed' | 'failed'>,
   availableNodeTypes: Annotation<string[]>,
   revisionCount: Annotation<number>,
+  availableCredentials: Annotation<N8nCredential[]>({
+    value: (_x, y) => y ?? [],
+    default: () => [],
+  }),
   // Parallel Execution Support
   strategies: Annotation<any[]>,
   candidates: Annotation<any[]>({

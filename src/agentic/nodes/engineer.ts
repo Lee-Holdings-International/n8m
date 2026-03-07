@@ -1,4 +1,4 @@
-import { AIService } from "../../services/ai.service.js";
+import { AIService, buildCredentialContext } from "../../services/ai.service.js";
 import { TeamState } from "../state.js";
 import { NodeDefinitionsService } from "../../services/node-definitions.service.js";
 import { jsonrepair } from "jsonrepair";
@@ -104,13 +104,16 @@ export const engineerNode = async (state: typeof TeamState.State) => {
     throw new Error("Workflow specification is missing.");
   }
 
+  const credentialContext = buildCredentialContext(state.availableCredentials ?? []);
+
   try {
     const prompt = `You are an n8n Workflow Engineer.
        Generate the valid n8n workflow JSON(s) based on the following approved Specification.
-       
+
        Specification:
        ${JSON.stringify(state.spec, null, 2)}
        ${ragContext}
+       ${credentialContext}
        ${state.userFeedback ? `\n\nUSER FEEDBACK / REFINEMENTS:\n${state.userFeedback}\n(Incorporate this feedback into the generation process)` : ""}
        
        IMPORTANT:

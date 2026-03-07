@@ -63,6 +63,17 @@ export default class Modify extends Command {
          this.log(theme.warn(`⚠ Failed to fetch node types: ${(e as Error).message}`));
     }
 
+    // 1b. Fetch available credentials for AI guidance
+    let availableCredentials: any[] = [];
+    try {
+        availableCredentials = await client.getCredentials();
+        if (availableCredentials.length > 0) {
+            this.log(theme.muted(`  Found ${availableCredentials.length} credential(s) — AI will use these for node selection.`));
+        }
+    } catch {
+        // Non-fatal — proceed without credential context
+    }
+
     // 2. Resolve Workflow
     let workflowData: any;
     let workflowName = 'Untitled';
@@ -168,7 +179,8 @@ export default class Modify extends Command {
         messages: [],
         validationErrors: [],
         workflowJson: workflowData,
-        availableNodeTypes: validNodeTypes
+        availableNodeTypes: validNodeTypes,
+        availableCredentials,
     };
 
     try {

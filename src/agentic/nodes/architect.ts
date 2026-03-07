@@ -22,7 +22,8 @@ export const architectNode = async (state: typeof TeamState.State) => {
   }
 
   try {
-    const spec = await aiService.generateSpec(state.userGoal);
+    const credentials = state.availableCredentials ?? [];
+    const spec = await aiService.generateSpec(state.userGoal, credentials);
 
     // Check if the spec requires clarification
     const questions = spec.questions;
@@ -30,7 +31,7 @@ export const architectNode = async (state: typeof TeamState.State) => {
 
     // Multi-agent collaboration: generate an alternative strategy in parallel with the primary.
     // Both are handed off to separate Engineer agents that run concurrently.
-    const alternativeSpec = await aiService.generateAlternativeSpec(state.userGoal, spec);
+    const alternativeSpec = await aiService.generateAlternativeSpec(state.userGoal, spec, credentials);
 
     const alternativeModel = aiService.getAlternativeModel();
 
