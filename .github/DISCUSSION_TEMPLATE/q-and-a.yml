@@ -42,4 +42,4 @@ body:
     id: version
     attributes:
       label: n8m version
-      placeholder: "e.g. 0.3.3  (run: npx n8m --version)"
+      placeholder: "e.g. 0.3.3  (run: npx @lhi/n8m --version)"

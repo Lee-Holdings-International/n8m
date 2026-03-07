@@ -27,10 +27,10 @@ No account. No server. Bring your own AI key and your n8n instance.
 
 ```bash
 # Option A: Run without installing (npx)
-npx n8m <command>
+npx @lhi/n8m <command>
 
 # Option B: Install globally
-npm install -g n8m
+npm install -g @lhi/n8m
 ```
 
 ## Setup
@@ -42,16 +42,16 @@ npm install -g n8m
 
 ```bash
 # OpenAI
-npx n8m config --ai-provider openai --ai-key sk-...
+npx @lhi/n8m config --ai-provider openai --ai-key sk-...
 
 # Anthropic (Claude)
-npx n8m config --ai-provider anthropic --ai-key sk-ant-...
+npx @lhi/n8m config --ai-provider anthropic --ai-key sk-ant-...
 
 # Google Gemini
-npx n8m config --ai-provider gemini --ai-key AIza...
+npx @lhi/n8m config --ai-provider gemini --ai-key AIza...
 
 # Any OpenAI-compatible API (Ollama, Groq, Together, LM Studio, etc.)
-npx n8m config --ai-base-url http://localhost:11434/v1 --ai-key ollama --ai-model llama3
+npx @lhi/n8m config --ai-base-url http://localhost:11434/v1 --ai-key ollama --ai-model llama3
 ```
 
 You can also use environment variables or a `.env` file — stored config takes
@@ -69,7 +69,7 @@ Default models per provider: `gpt-4o` · `claude-sonnet-4-6` · `gemini-2.5-flas
 ### 2. Configure your n8n instance
 
 ```bash
-npx n8m config --n8n-url https://your-n8n.example.com --n8n-key <your-n8n-api-key>
+npx @lhi/n8m config --n8n-url https://your-n8n.example.com --n8n-key <your-n8n-api-key>
 ```
 
 Credentials are saved locally to `~/.n8m/config.json`. You can also use
@@ -408,7 +408,7 @@ Add it to your MCP client config (e.g. Claude Desktop's `claude_desktop_config.j
   "mcpServers": {
     "n8m": {
       "command": "npx",
-      "args": ["n8m", "mcp"]
+      "args": ["@lhi/n8m", "mcp"]
     }
   }
 }

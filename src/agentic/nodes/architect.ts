@@ -57,7 +57,6 @@ export const architectNode = async (state: typeof TeamState.State) => {
       collaborationLog: [logEntry],
     };
   } catch (error) {
-    console.error("Architect failed:", error);
     throw error;
   }
 };

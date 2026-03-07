@@ -28,7 +28,7 @@ What actually happened. Include any error output.
 
 | Field | Value |
 |---|---|
-| n8m version | `npx n8m --version` |
+| n8m version | `npx @lhi/n8m --version` |
 | Node version | `node --version` |
 | OS | e.g. macOS 15, Ubuntu 24.04 |
 | AI provider | e.g. openai / anthropic / gemini / ollama |

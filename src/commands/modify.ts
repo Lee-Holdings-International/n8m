@@ -323,7 +323,12 @@ export default class Modify extends Command {
         }
 
     } catch (error) {
-        this.error(`Agent encountered an error: ${(error as Error).message}`);
+        const msg = (error as Error).message ?? '';
+        const status = (error as any).status;
+        if (status === 401 || /authentication_error|invalid.*api.?key|incorrect api key/i.test(msg)) {
+            this.error(`Authentication failed: invalid API key.\nRun: npx @lhi/n8m config --ai-key <your-key>`);
+        }
+        this.error(`Agent encountered an error: ${msg}`);
     }
 
     // 5. POST-MODIFICATION ACTIONS

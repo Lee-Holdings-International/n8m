@@ -90,7 +90,8 @@ export default class Create extends Command {
 
     // 2. AGENTIC EXECUTION
     const threadId = randomUUID();
-    this.log(theme.info(`\nInitializing Agentic Workflow for: "${description}" (Session: ${threadId})`));
+    this.log('\n' + theme.session(threadId));
+    this.log(theme.stageStart('Architect', 'Analyzing requirements...'));
 
     // Fetch available credentials for AI guidance (gracefully skipped if n8n not configured)
     let availableCredentials: any[] = [];
@@ -118,18 +119,12 @@ export default class Create extends Command {
             const stateUpdate = (event as Record<string, any>)[nodeName];
             
             if (nodeName === 'architect') {
-                this.log(theme.agent(`🏗️  Architect: Blueprint designed.`));
-                if (stateUpdate.strategies && stateUpdate.strategies.length > 0) {
-                    this.log(theme.header('\nPROPOSED STRATEGIES:'));
-                    stateUpdate.strategies.forEach((s: any, i: number) => {
-                        this.log(`${i === 0 ? theme.success('  [Primary]') : theme.info('  [Alternative]')} ${theme.value(s.suggestedName)}`);
-                        this.log(`  Description: ${s.description}`);
-                        if (s.nodes && s.nodes.length > 0) {
-                            this.log(`  Proposed Nodes: ${s.nodes.map((n: any) => n.type.split('.').pop()).join(', ')}`);
-                        }
-                        this.log('');
-                    });
-                }
+                const count = stateUpdate.strategies?.length ?? 1;
+                this.log(theme.stagePass('Blueprint ready', `${count} approach${count !== 1 ? 'es' : ''}`));
+                const topNodes = stateUpdate.strategies?.[0]?.nodes
+                    ?.map((n: any) => n.type?.split('.').pop())
+                    .join(' → ');
+                if (topNodes) this.log(theme.treeItem(topNodes));
             }
         }
 
@@ -143,12 +138,14 @@ export default class Create extends Command {
 
                 if (isRepair) {
                     // Repair iteration — auto-continue without asking the user
+                    this.log(theme.stageStart('Engineer', 'Applying fixes...'));
                     const repairStream = await graph.stream(null, { configurable: { thread_id: threadId } });
                     for await (const event of repairStream) {
                         const n = Object.keys(event)[0];
                         const u = (event as Record<string, any>)[n];
                         if (n === 'engineer') {
-                            this.log(theme.agent(`⚙️  Engineer: Applying fixes...`));
+                            const lineCount = u.workflowJson ? JSON.stringify(u.workflowJson, null, 2).split('\n').length : 0;
+                            this.log(theme.stagePass('Fixes applied', `${lineCount} lines`));
                             if (u.workflowJson) lastWorkflowJson = u.workflowJson;
                         } else if (n === 'supervisor' && u.workflowJson) {
                             lastWorkflowJson = u.workflowJson;
@@ -207,7 +204,7 @@ export default class Create extends Command {
                     }]);
 
                     if (choice.type === 'exit') {
-                        this.log(theme.info(`\nSession saved. Resume later with: n8m resume ${threadId}`));
+                        this.log(theme.muted(`\n  Session saved. Resume later with: n8m resume ${threadId}`));
                         return;
                     }
 
@@ -265,17 +262,19 @@ export default class Create extends Command {
 
                     await graph.updateState({ configurable: { thread_id: threadId } }, stateUpdate);
 
+                    this.log(theme.stageStart('Engineer', 'Building workflow JSON...'));
                     const buildStream = await graph.stream(null, { configurable: { thread_id: threadId } });
                     for await (const event of buildStream) {
                         const n = Object.keys(event)[0];
                         const u = (event as Record<string, any>)[n];
                         if (n === 'engineer') {
-                            this.log(theme.agent(`⚙️  Engineer: Building workflow...`));
+                            const lineCount = u.workflowJson ? JSON.stringify(u.workflowJson, null, 2).split('\n').length : 0;
+                            this.log(theme.stagePass('Workflow generated', `${lineCount} lines`));
                             if (u.workflowJson) lastWorkflowJson = u.workflowJson;
                         } else if (n === 'supervisor' && u.workflowJson) {
                             lastWorkflowJson = u.workflowJson;
                         } else if (n === 'reviewer' && u.validationStatus === 'failed') {
-                            this.log(theme.warn(`   Reviewer flagged issues — Engineer will revise...`));
+                            this.log(theme.stageFail('Reviewer flagged issues — Engineer will revise'));
                         }
                     }
                 }
@@ -289,24 +288,24 @@ export default class Create extends Command {
                 }]);
 
                 if (!proceed) {
-                    this.log(theme.info(`\nSession saved. Resume later with: n8m resume ${threadId}`));
+                    this.log(theme.muted(`\n  Session saved. Resume later with: n8m resume ${threadId}`));
                     return;
                 }
 
+                this.log(theme.stageStart('QA', 'Validating structure...'));
                 const qaStream = await graph.stream(null, { configurable: { thread_id: threadId } });
                 for await (const event of qaStream) {
                     const n = Object.keys(event)[0];
                     const u = (event as Record<string, any>)[n];
                     if (n === 'qa') {
                         if (u.validationStatus === 'passed') {
-                            this.log(theme.success(`🧪 QA: Validation Passed!`));
+                            this.log(theme.stagePass('All checks passed'));
                             if (u.workflowJson) lastWorkflowJson = u.workflowJson;
                         } else {
-                            this.log(theme.fail(`🧪 QA: Validation Failed.`));
+                            this.log(theme.stageFail('Validation failed'));
                             if (u.validationErrors?.length) {
-                                (u.validationErrors as string[]).forEach(e => this.log(theme.error(`   - ${e}`)));
+                                (u.validationErrors as string[]).forEach(e => this.log(theme.treeItem(`  ${e}`)));
                             }
-                            this.log(theme.warn(`   Looping back to Engineer for repairs...`));
                         }
                     } else if (n === 'supervisor' && u.workflowJson) {
                         lastWorkflowJson = u.workflowJson;
@@ -323,7 +322,12 @@ export default class Create extends Command {
         }
 
     } catch (error) {
-        this.error(`Agent ran into an unrecoverable error: ${(error as Error).message}`);
+        const msg = (error as Error).message ?? '';
+        const status = (error as any).status;
+        if (status === 401 || /authentication_error|invalid.*api.?key|incorrect api key/i.test(msg)) {
+            this.error(`Authentication failed: invalid API key.\nRun: npx @lhi/n8m config --ai-key <your-key>`);
+        }
+        this.error(`Agent ran into an unrecoverable error: ${msg}`);
     }
 
     if (!lastWorkflowJson) {
@@ -350,14 +354,15 @@ export default class Create extends Command {
         await fs.mkdir(targetDir, { recursive: true });
         await fs.writeFile(targetFile, JSON.stringify(workflow, null, 2));
 
-        this.log(theme.success(`\nWorkflow organized at: ${targetDir}`));
-        
         // Auto-Generate Documentation
-        this.log(theme.agent("Generating initial documentation..."));
         const mermaid = docService.generateMermaid(workflow);
         const readmeContent = await docService.generateReadme(workflow);
         const fullDoc = `# ${projectTitle}\n\n## Visual Flow\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n\n${readmeContent}`;
         await fs.writeFile(path.join(targetDir, 'README.md'), fullDoc);
+
+        this.log(theme.savedDir(path.relative(process.cwd(), targetDir)));
+        this.log(theme.treeItem('├── workflow.json'));
+        this.log(theme.treeItem('└── README.md'));
 
         savedResources.push({ path: targetFile, name: projectTitle, original: workflow });
     }

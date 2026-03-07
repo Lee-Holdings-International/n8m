@@ -95,6 +95,20 @@ export const theme = {
   // AI/Agentic
   agent: (text: string) => c.ai('✧ ') + c.ai.italic(text),
 
+  // Site-terminal stage style (matches n8m.run terminal demo)
+  stageStart: (name: string, desc: string) => {
+    const padded = name.padEnd(12);
+    return chalk.hex('#fb923c').bold(`  ${padded}`) + chalk.hex('#64748b')(desc);
+  },
+  stagePass: (text: string, sub?: string) => {
+    const line = chalk.hex('#4ade80')('  ✓') + '  ' + chalk.hex('#f1f5f9')(text);
+    return sub ? line + chalk.hex('#64748b')(` · ${sub}`) : line;
+  },
+  stageFail: (text: string) => chalk.hex('#f87171')('  ✗') + '  ' + chalk.hex('#f1f5f9')(text),
+  savedDir: (dirPath: string) => chalk.hex('#4ade80').bold('\n  Saved') + ' ' + chalk.hex('#94a3b8')(dirPath),
+  treeItem: (line: string) => chalk.hex('#94a3b8')(`    ${line}`),
+  session: (id: string) => chalk.hex('#3d5070')(`  Session: ${id}`),
+
   // Brand/Banner
   brand: () => {
     const bannerPath = join(rootPath, 'banner.txt');

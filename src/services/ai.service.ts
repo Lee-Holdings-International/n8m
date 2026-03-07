@@ -171,7 +171,14 @@ export class AIService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Anthropic API Error: ${response.status} - ${errorText}`);
+      let cleanMessage = `Anthropic API Error: ${response.status}`;
+      try {
+        const parsed = JSON.parse(errorText);
+        cleanMessage = parsed?.error?.message ?? cleanMessage;
+      } catch { /* not JSON */ }
+      const err = new Error(cleanMessage);
+      (err as any).status = response.status;
+      throw err;
     }
 
     const result = await response.json() as any;
