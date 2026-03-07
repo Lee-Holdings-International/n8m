@@ -81,21 +81,34 @@ export default class Modify extends Command {
         
         const localChoices: any[] = [];
         const workflowsDir = path.join(process.cwd(), 'workflows');
-        const searchDirs = [workflowsDir, process.cwd()];
-        
-        for (const dir of searchDirs) {
-            if (existsSync(dir)) {
-                const files = await fs.readdir(dir);
-                for (const file of files) {
-                    if (file.endsWith('.json')) {
-                        localChoices.push({
-                            name: `${theme.value('[LOCAL]')} ${file}`,
-                            value: { type: 'local', path: path.join(dir, file) }
-                        });
-                    }
+
+        const scanDir = async (dir: string, rootDir: string): Promise<void> => {
+            let entries;
+            try {
+                entries = await fs.readdir(dir, { withFileTypes: true });
+            } catch {
+                return;
+            }
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    await scanDir(fullPath, rootDir);
+                } else if (entry.name.endsWith('.json')) {
+                    let label = path.relative(rootDir, fullPath);
+                    try {
+                        const raw = await fs.readFile(fullPath, 'utf-8');
+                        const parsed = JSON.parse(raw);
+                        if (parsed.name) label = `${parsed.name}  (${label})`;
+                    } catch { /* use path as label */ }
+                    localChoices.push({
+                        name: `${theme.value('[LOCAL]')} ${label}`,
+                        value: { type: 'local', path: fullPath }
+                    });
                 }
             }
-        }
+        };
+
+        if (existsSync(workflowsDir)) await scanDir(workflowsDir, workflowsDir);
 
         const remoteWorkflows = await client.getWorkflows();
         const remoteChoices = remoteWorkflows
@@ -133,18 +146,9 @@ export default class Modify extends Command {
 
     // 3. Get Instruction
     let instruction = args.instruction;
-    if (!instruction && flags.multiline) {
-        const response = await inquirer.prompt([{
-            type: 'editor',
-            name: 'instruction',
-            message: 'Describe the modifications you want to apply (opens editor):',
-            validate: (d: string) => d.trim().length > 0
-        }]);
-        instruction = response.instruction;
-    }
 
     if (!instruction) {
-        instruction = await promptMultiline('Describe the modifications you want to apply:');
+        instruction = await promptMultiline('Describe the modifications you want to apply (use ``` for multiline): ');
     }
 
     if (!instruction) {
@@ -174,55 +178,135 @@ export default class Modify extends Command {
         }, {
             configurable: { thread_id: threadId }
         });
-        
+
         for await (const event of stream) {
             const nodeName = Object.keys(event)[0];
             const stateUpdate = (event as Record<string, any>)[nodeName];
-            
+
             if (nodeName === 'architect') {
-                this.log(theme.agent(`🏗️  Architect: Analysis complete.`));
-                if (stateUpdate.spec) {
-                    this.log(`   Plan: ${theme.value(stateUpdate.spec.suggestedName || 'Modifying structure')}`);
-                }
+                this.log(theme.agent(`🏗️  Architect: Modification plan ready.`));
             } else if (nodeName === 'engineer') {
-               this.log(theme.agent(`⚙️  Engineer: Applying changes to workflow...`));
-               if (stateUpdate.workflowJson) {
-                   lastWorkflowJson = stateUpdate.workflowJson;
-               }
+                this.log(theme.agent(`⚙️  Engineer: Applying changes to workflow...`));
+                if (stateUpdate.workflowJson) lastWorkflowJson = stateUpdate.workflowJson;
             } else if (nodeName === 'qa') {
-               const status = stateUpdate.validationStatus;
-               if (status === 'passed') {
-                   this.log(theme.success(`🧪 QA: Modification Validated.`));
-               } else {
-                   this.log(theme.fail(`🧪 QA: Validation Issues Found.`));
-                   if (stateUpdate.validationErrors && stateUpdate.validationErrors.length > 0) {
-                       stateUpdate.validationErrors.forEach((e: string) => this.log(theme.error(`   - ${e}`)));
-                   }
-                   this.log(theme.warn(`   Looping back for refinements...`));
-               }
+                if (stateUpdate.validationStatus === 'passed') {
+                    this.log(theme.success(`🧪 QA: Modification Validated.`));
+                } else {
+                    this.log(theme.fail(`🧪 QA: Validation Issues Found.`));
+                    if (stateUpdate.validationErrors?.length) {
+                        stateUpdate.validationErrors.forEach((e: string) => this.log(theme.error(`   - ${e}`)));
+                    }
+                    this.log(theme.warn(`   Looping back for refinements...`));
+                }
             }
         }
 
-        // HITL Pause
-        const snapshot = await graph.getState({ configurable: { thread_id: threadId } });
-        if (snapshot.next.length > 0) {
-            this.log(theme.warn(`\n⏸️  Modification Paused at step: ${snapshot.next.join(', ')}`));
-            
-             const { resume } = await inquirer.prompt([{
-                type: 'confirm',
-                name: 'resume',
-                message: 'Review pending changes. Proceed with finalization?',
-                default: true
-            }]);
+        // HITL loop — same pattern as create.ts
+        let snapshot = await graph.getState({ configurable: { thread_id: threadId } });
+        while (snapshot.next.length > 0) {
+            const nextNode = snapshot.next[0];
 
-            if (resume) {
-                 this.log(theme.agent("Finalizing..."));
-                 const result = await resumeAgenticWorkflow(threadId);
-                 if (result.workflowJson) lastWorkflowJson = result.workflowJson;
+            if (nextNode === 'engineer') {
+                const isRepair = (snapshot.values.validationErrors as string[] || []).length > 0;
+
+                if (isRepair) {
+                    // Repair iteration — auto-continue
+                    const repairStream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                    for await (const event of repairStream) {
+                        const n = Object.keys(event)[0];
+                        const u = (event as Record<string, any>)[n];
+                        if (n === 'engineer' && u.workflowJson) lastWorkflowJson = u.workflowJson;
+                    }
+                } else {
+                    // Show modification plan and give options
+                    const plan = snapshot.values.spec;
+                    if (plan) {
+                        this.log(theme.header('\nMODIFICATION PLAN:'));
+                        this.log(`  ${theme.value(plan.description || '')}`);
+                        if (plan.proposedChanges?.length) {
+                            this.log(theme.info('\nProposed Changes:'));
+                            (plan.proposedChanges as string[]).forEach(c => this.log(`  ${theme.muted('•')} ${c}`));
+                        }
+                        if (plan.affectedNodes?.length) {
+                            this.log(`\n${theme.label('Affected Nodes')} ${(plan.affectedNodes as string[]).join(', ')}`);
+                        }
+                        this.log('');
+                    }
+
+                    const choices: any[] = [
+                        { name: 'Proceed with this plan', value: { type: 'proceed' } },
+                        { name: 'Add feedback before modifying', value: { type: 'feedback' } },
+                        new inquirer.Separator(),
+                        { name: 'Exit (discard)', value: { type: 'exit' } },
+                    ];
+
+                    const { choice } = await inquirer.prompt([{
+                        type: 'list',
+                        name: 'choice',
+                        message: 'Blueprint ready. How would you like to proceed?',
+                        choices,
+                    }]);
+
+                    if (choice.type === 'exit') {
+                        this.log(theme.info(`\nSession saved. Resume later with: n8m resume ${threadId}`));
+                        return;
+                    }
+
+                    let stateUpdate: Record<string, any> = {};
+                    if (choice.type === 'feedback') {
+                        const { feedback } = await inquirer.prompt([{
+                            type: 'input',
+                            name: 'feedback',
+                            message: 'Describe your refinements:',
+                        }]);
+                        stateUpdate = { userFeedback: feedback };
+                        this.log(theme.agent(`Feedback noted. Applying modifications with your refinements...`));
+                    } else {
+                        this.log(theme.agent(`⚙️  Engineer: Applying modifications...`));
+                    }
+
+                    if (Object.keys(stateUpdate).length > 0) {
+                        await graph.updateState({ configurable: { thread_id: threadId } }, stateUpdate);
+                    }
+
+                    const engineerStream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                    for await (const event of engineerStream) {
+                        const n = Object.keys(event)[0];
+                        const u = (event as Record<string, any>)[n];
+                        if (n === 'engineer' && u.workflowJson) lastWorkflowJson = u.workflowJson;
+                        else if (n === 'reviewer' && u.validationStatus === 'failed') {
+                            this.log(theme.warn(`   Reviewer flagged issues — Engineer will revise...`));
+                        }
+                    }
+                }
+
+            } else if (nextNode === 'qa') {
+                this.log(theme.agent(`⚙️  Running QA validation...`));
+                const qaStream = await graph.stream(null, { configurable: { thread_id: threadId } });
+                for await (const event of qaStream) {
+                    const n = Object.keys(event)[0];
+                    const u = (event as Record<string, any>)[n];
+                    if (n === 'qa') {
+                        if (u.validationStatus === 'passed') {
+                            this.log(theme.success(`🧪 QA: Validation Passed.`));
+                            if (u.workflowJson) lastWorkflowJson = u.workflowJson;
+                        } else {
+                            this.log(theme.fail(`🧪 QA: Validation Failed.`));
+                            if (u.validationErrors?.length) {
+                                (u.validationErrors as string[]).forEach(e => this.log(theme.error(`   - ${e}`)));
+                            }
+                            this.log(theme.warn(`   Looping back to Engineer for repairs...`));
+                        }
+                    }
+                }
+
             } else {
-                this.log(theme.info(`Session persisted. Thread: ${threadId}`));
-                return;
+                // Unknown interrupt — auto-resume
+                const result = await resumeAgenticWorkflow(threadId, null);
+                if (result.workflowJson) lastWorkflowJson = result.workflowJson;
             }
+
+            snapshot = await graph.getState({ configurable: { thread_id: threadId } });
         }
 
     } catch (error) {
@@ -246,44 +330,89 @@ export default class Modify extends Command {
         // maybe add a suffix? Or just keep it. 
     }
 
+    // Find an existing local file matching by workflow ID or name
+    const findExistingLocalPath = async (): Promise<string | undefined> => {
+        const workflowsDir = path.join(process.cwd(), 'workflows');
+        const searchId = modifiedWorkflow.id || workflowData.id;
+        const searchName = modifiedWorkflow.name || workflowName;
+        const search = async (dir: string): Promise<string | undefined> => {
+            let entries;
+            try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return undefined; }
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    const found = await search(fullPath);
+                    if (found) return found;
+                } else if (entry.name.endsWith('.json')) {
+                    try {
+                        const parsed = JSON.parse(await fs.readFile(fullPath, 'utf-8'));
+                        if ((searchId && parsed.id === searchId) || parsed.name === searchName) return fullPath;
+                    } catch { /* skip */ }
+                }
+            }
+        };
+        return search(workflowsDir);
+    };
+
+    const saveLocally = async (promptPath = true) => {
+        const existingPath = originalPath || await findExistingLocalPath();
+        const defaultPath = flags.output || existingPath || path.join(process.cwd(), 'workflows', `${workflowName}.json`);
+        let targetPath = defaultPath;
+        if (promptPath && !existingPath) {
+            const { p } = await inquirer.prompt([{
+                type: 'input',
+                name: 'p',
+                message: 'Save modified workflow to:',
+                default: defaultPath
+            }]);
+            targetPath = p;
+        }
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await fs.writeFile(targetPath, JSON.stringify(modifiedWorkflow, null, 2));
+        this.log(theme.success(`✔ Saved to ${targetPath}`));
+    };
+
     const { action } = await inquirer.prompt([{
-        type: 'select', 
+        type: 'select',
         name: 'action',
         message: 'Modification complete. What would you like to do?',
         choices: [
-            { name: 'Save locally', value: 'save' },
-            { name: 'Deploy to n8n instance', value: 'deploy' },
+            { name: 'Deploy to n8n instance (also saves locally)', value: 'deploy' },
+            { name: 'Save locally only', value: 'save' },
             { name: 'Run ephemeral test (n8m test)', value: 'test' },
             { name: 'Discard changes', value: 'discard' }
         ]
     }]);
 
     if (action === 'save') {
-        const defaultPath = flags.output || originalPath || path.join(process.cwd(), 'workflows', `${workflowName}-modified.json`);
-        const { targetPath } = await inquirer.prompt([{
-            type: 'input',
-            name: 'targetPath',
-            message: 'Save modified workflow to:',
-            default: defaultPath
-        }]);
-        
-        await fs.mkdir(path.dirname(targetPath), { recursive: true });
-        await fs.writeFile(targetPath, JSON.stringify(modifiedWorkflow, null, 2));
-        this.log(theme.success(`✔ Saved to ${targetPath}`));
+        await saveLocally();
     } else if (action === 'deploy') {
-        if (remoteId) {
-            this.log(theme.info(`Updating remote workflow ${remoteId}...`));
-            await client.updateWorkflow(remoteId, modifiedWorkflow);
-            this.log(theme.success(`✔ Remote workflow updated.`));
+        const targetId = remoteId || modifiedWorkflow.id;
+        if (targetId) {
+            let existsRemotely = false;
+            try {
+                await client.getWorkflow(targetId);
+                existsRemotely = true;
+            } catch { /* not found */ }
+
+            if (existsRemotely) {
+                this.log(theme.info(`Updating remote workflow ${targetId}...`));
+                await client.updateWorkflow(targetId, modifiedWorkflow);
+                this.log(theme.success(`✔ Remote workflow updated.`));
+                this.log(`${theme.label('Link')} ${theme.secondary(client.getWorkflowLink(targetId))}`);
+            } else {
+                const result = await client.createWorkflow(modifiedWorkflow.name, modifiedWorkflow);
+                modifiedWorkflow.id = result.id;
+                this.log(theme.success(`✔ Created workflow [ID: ${result.id}]`));
+                this.log(`${theme.label('Link')} ${theme.secondary(client.getWorkflowLink(result.id))}`);
+            }
         } else {
-            this.log(theme.info(`Creating new workflow on instance...`));
-            const payload = { ...modifiedWorkflow };
-            // Remove ID to ensure a fresh creation
-            delete payload.id;
-            const result = await client.createWorkflow(payload.name, payload);
+            const result = await client.createWorkflow(modifiedWorkflow.name, modifiedWorkflow);
+            modifiedWorkflow.id = result.id;
             this.log(theme.success(`✔ Created workflow [ID: ${result.id}]`));
             this.log(`${theme.label('Link')} ${theme.secondary(client.getWorkflowLink(result.id))}`);
         }
+        await saveLocally(false);
     } else if (action === 'test') {
         // Automatically run the test command
         const tempPath = path.join(process.cwd(), '.n8m-temp-modified.json');
@@ -297,5 +426,6 @@ export default class Modify extends Command {
     }
 
     this.log(theme.done('Modification Process Complete.'));
+    process.exit(0);
   }
 }

@@ -521,6 +521,64 @@ describe('AIService', () => {
   });
 
   // -------------------------------------------------------------------------
+  describe('generatePattern() with mocked client', () => {
+    it('returns content string and a slug derived from the workflow name', async () => {
+      injectMockClient(service, '<!-- keywords: bigquery, sql -->\n# Pattern: BigQuery\n\nUse HTTP.');
+      const wf = { name: 'Substack to BigQuery', nodes: [], connections: {} };
+      const result = await service.generatePattern(wf);
+      expect(result.content).to.include('# Pattern: BigQuery');
+      expect(result.slug).to.equal('substack-to-bigquery');
+    });
+
+    it('lowercases and hyphenates the slug', async () => {
+      injectMockClient(service, '<!-- keywords: test -->\n# Pattern: Test');
+      const wf = { name: 'My Awesome  Workflow!', nodes: [], connections: {} };
+      const { slug } = await service.generatePattern(wf);
+      expect(slug).to.match(/^[a-z0-9-]+$/);
+      expect(slug).to.equal('my-awesome-workflow');
+    });
+
+    it('falls back to "workflow" slug when name is missing', async () => {
+      injectMockClient(service, '<!-- keywords: test -->\n# Pattern: Test');
+      const wf = { nodes: [], connections: {} };
+      const { slug } = await service.generatePattern(wf as any);
+      expect(slug).to.equal('workflow');
+    });
+
+    it('strips only name/nodes/connections from the workflow before sending', async () => {
+      let capturedPrompt = '';
+      (service as any).client = {
+        chat: {
+          completions: {
+            create: async (opts: any) => {
+              capturedPrompt = opts.messages[0].content;
+              return { choices: [{ message: { content: '<!-- keywords: x -->\n# P' } }] };
+            },
+          },
+        },
+      };
+      const wf = {
+        name: 'Test WF',
+        nodes: [{ name: 'HTTP', type: 'n8n-nodes-base.httpRequest', parameters: { url: 'https://example.com' } }],
+        connections: { HTTP: { main: [] } },
+        id: 'should-not-appear',
+        meta: { instanceId: 'should-not-appear' },
+      };
+      await service.generatePattern(wf);
+      expect(capturedPrompt).to.include('"name": "Test WF"');
+      expect(capturedPrompt).to.not.include('should-not-appear');
+    });
+
+    it('returns the full AI response as content', async () => {
+      const mdContent = '<!-- keywords: slack, webhook -->\n# Pattern: Slack\n\nDetails here.';
+      injectMockClient(service, mdContent);
+      const wf = { name: 'Slack Notifier', nodes: [], connections: {} };
+      const { content } = await service.generatePattern(wf);
+      expect(content).to.equal(mdContent);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe('evaluateCandidates() with mocked client', () => {
     it('returns index 0 immediately for a single candidate without an AI call', async () => {
       // No mock injected — if AI is called this test would fail with a real API error

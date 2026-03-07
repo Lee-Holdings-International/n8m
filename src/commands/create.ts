@@ -10,6 +10,7 @@ import { promptMultiline } from '../utils/multilinePrompt.js';
 import { DocService } from '../services/doc.service.js';
 import { ConfigManager } from '../utils/config.js';
 import { N8nClient } from '../utils/n8nClient.js';
+import { AIService } from '../services/ai.service.js';
 
 export default class Create extends Command {
   static args = {
@@ -165,6 +166,11 @@ export default class Create extends Command {
 
                     choices.push(new inquirer.Separator());
                     choices.push({
+                        name: 'Discuss details with the Engineer',
+                        value: { type: 'chat' },
+                        short: 'Discuss',
+                    });
+                    choices.push({
                         name: 'Add feedback before building',
                         value: { type: 'feedback' },
                         short: 'Add feedback',
@@ -192,7 +198,43 @@ export default class Create extends Command {
                     let chosenSpec = choice.strategy ?? spec;
                     let stateUpdate: Record<string, any> = { spec: chosenSpec, userFeedback: undefined };
 
-                    if (choice.type === 'feedback') {
+                    if (choice.type === 'chat') {
+                        const aiService = AIService.getInstance();
+                        const chatHistory: { role: 'user' | 'assistant'; content: string }[] = [];
+                        let currentSpec = chosenSpec ?? strategies[0] ?? spec;
+
+                        this.log(theme.header('\nCHATTING WITH THE ENGINEER'));
+                        this.log(theme.muted(`  Plan: ${currentSpec?.suggestedName}`));
+                        this.log(theme.muted(`  Type your question or request. Enter "done" when ready to build.\n`));
+
+                        while (true) {
+                            const { message } = await inquirer.prompt([{
+                                type: 'input',
+                                name: 'message',
+                                message: 'You:',
+                            }]);
+
+                            const trimmed = (message as string).trim();
+                            if (!trimmed || /^(done|build|approve|go|ok|yes)$/i.test(trimmed)) {
+                                this.log(theme.agent(`Understood. Building "${currentSpec?.suggestedName}"...\n`));
+                                break;
+                            }
+
+                            const { reply, updatedSpec } = await aiService.chatAboutSpec(currentSpec, chatHistory, trimmed);
+                            chatHistory.push({ role: 'user', content: trimmed });
+                            chatHistory.push({ role: 'assistant', content: reply });
+                            currentSpec = updatedSpec;
+
+                            this.log(`\n${theme.agent('Engineer:')} ${reply}\n`);
+
+                            if (updatedSpec.suggestedName !== (chosenSpec ?? spec)?.suggestedName) {
+                                this.log(theme.muted(`  (Plan updated: ${updatedSpec.suggestedName})`));
+                            }
+                        }
+
+                        chosenSpec = currentSpec;
+                        stateUpdate = { spec: chosenSpec, userFeedback: undefined };
+                    } else if (choice.type === 'feedback') {
                         const { feedback } = await inquirer.prompt([{
                             type: 'input',
                             name: 'feedback',

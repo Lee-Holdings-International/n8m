@@ -14,6 +14,7 @@ export interface GenerateOptions {
   model?: string;
   provider?: string;
   temperature?: number;
+  maxTokens?: number;
 }
 
 export interface TestErrorEvaluation {
@@ -143,7 +144,7 @@ export class AIService {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 4096,
+        max_tokens: options.maxTokens ?? 4096,
         messages: [{ role: 'user', content: prompt }],
         temperature: options.temperature ?? 0.7,
       })
@@ -257,6 +258,45 @@ export class AIService {
     }
   }
 
+  async chatAboutSpec(
+    spec: WorkflowSpec,
+    history: { role: 'user' | 'assistant'; content: string }[],
+    userMessage: string
+  ): Promise<{ reply: string; updatedSpec: WorkflowSpec }> {
+    const conversationText = history
+      .map(h => `${h.role === 'user' ? 'User' : 'Architect'}: ${h.content}`)
+      .join('\n');
+
+    const prompt = `You are an n8n Workflow Architect having a planning conversation with the user.
+
+Current Workflow Spec:
+${JSON.stringify(spec, null, 2)}
+
+${conversationText ? `Conversation so far:\n${conversationText}\n` : ''}User: ${userMessage}
+
+Respond conversationally to help the user understand or refine the plan. If the user requests changes to the workflow approach, update the spec accordingly.
+
+Output a JSON object:
+{
+  "reply": "Your conversational response here",
+  "updatedSpec": { /* full spec JSON — same structure as input, with any requested changes applied */ }
+}
+
+Output ONLY valid JSON. No markdown.`;
+
+    const response = await this.generateContent(prompt);
+    const cleanJson = response.replace(/```json\n?|\n?```/g, '').trim();
+    try {
+      const result = JSON.parse(jsonrepair(cleanJson));
+      return {
+        reply: result.reply || '',
+        updatedSpec: result.updatedSpec || spec,
+      };
+    } catch {
+      return { reply: response, updatedSpec: spec };
+    }
+  }
+
   async generateWorkflow(goal: string): Promise<any> {
     const prompt = `You are an n8n Expert.
        Generate a valid n8n workflow JSON for the following goal: "${goal}".
@@ -298,6 +338,204 @@ export class AIService {
     }
   }
 
+  async generateModificationPlan(instruction: string, workflowJson: any): Promise<any> {
+    const nodeList = (workflowJson.nodes || [])
+      .map((n: any) => `${n.name} (${n.type})`)
+      .join(', ');
+
+    const prompt = `You are an n8n Solution Architect reviewing a workflow modification request.
+
+Workflow: "${workflowJson.name || 'Untitled'}"
+Current nodes: ${nodeList}
+
+Modification requested: "${instruction}"
+
+Analyze the request and produce a concise modification plan as a JSON object:
+{
+  "suggestedName": "Updated workflow name (or same if unchanged)",
+  "description": "One-sentence summary of what this modification achieves",
+  "proposedChanges": ["Specific change 1", "Specific change 2"],
+  "affectedNodes": ["Node names that will be added, modified, or removed"]
+}
+Output ONLY the JSON object. No commentary.`;
+
+    const response = await this.generateContent(prompt);
+    const cleanJson = response.replace(/```json\n?|\n?```/g, '').trim();
+    try {
+      return JSON.parse(jsonrepair(cleanJson));
+    } catch {
+      return {
+        suggestedName: workflowJson.name || 'Modified Workflow',
+        description: instruction,
+        proposedChanges: [instruction],
+        affectedNodes: [],
+      };
+    }
+  }
+
+  async applyModification(workflowJson: any, userGoal: string, spec: any, userFeedback?: string, validNodeTypes: string[] = []): Promise<any> {
+    const nodeService = NodeDefinitionsService.getInstance();
+    const staticRef = nodeService.getStaticReference();
+
+    const prompt = `You are an n8n Workflow Engineer. Modify the following existing workflow.
+
+ORIGINAL WORKFLOW:
+${JSON.stringify(workflowJson, null, 2)}
+
+MODIFICATION INSTRUCTION:
+${userGoal}
+
+MODIFICATION PLAN:
+${JSON.stringify(spec, null, 2)}
+${userFeedback ? `\nUSER FEEDBACK:\n${userFeedback}\n` : ''}
+[N8N NODE REFERENCE GUIDE]
+${staticRef}
+
+${validNodeTypes.length > 0 ? `Valid node types: ${validNodeTypes.slice(0, 100).join(', ')}` : ''}
+
+Apply ALL proposed changes. Then verify the following before outputting:
+
+CONNECTION RULES — EVERY node must appear in the connections object:
+1. Every non-trigger node must have at least one incoming connection from another node.
+2. Every node that is not a terminal/sink must have at least one outgoing connection.
+3. New nodes inserted into the middle of the flow must be wired into BOTH the incoming edge (from the predecessor) AND the outgoing edge (to the successor) — do not leave gaps in the chain.
+4. If the original workflow had error output connections (e.g. "error" branch), replicate that pattern for any new nodes that have onError: "continueErrorOutput".
+5. The connections object keys are SOURCE node names; the "node" field inside is the TARGET node name. Double-check every name matches exactly.
+
+Preserve all existing nodes, connections, credentials, and IDs not mentioned in the plan. Add new nodes with unique string IDs.
+
+Output ONLY the complete workflow JSON object. No commentary. No markdown.`;
+
+    const response = await this.generateContent(prompt, { maxTokens: 8192 });
+    const cleanJson = response.replace(/```json\n?|\n?```/g, '').trim();
+
+    try {
+      const result = JSON.parse(jsonrepair(cleanJson));
+      const modified = result.workflows?.[0] || result;
+      return this.wireOrphanedErrorHandlers(this.fixHallucinatedNodes(this.repairConnections(modified, workflowJson)));
+    } catch (e) {
+      console.error('Failed to parse modified workflow JSON', e);
+      return workflowJson;
+    }
+  }
+
+  /**
+   * Merge connections from the original workflow into the modified one for any
+   * nodes that exist in both but lost their connections during LLM generation.
+   * Then does a position-based stitch for any remaining nodes with no outgoing
+   * main connection, using canvas x/y position to infer the intended chain order.
+   */
+  private repairConnections(modified: any, original: any): any {
+    if (!modified?.nodes || !modified?.connections) return modified;
+
+    const connections = { ...(modified.connections || {}) };
+    const origConnections: Record<string, any> = original?.connections || {};
+    const nodeNames = new Set<string>((modified.nodes as any[]).map((n: any) => n.name));
+
+    // 1. Restore original connections for nodes that exist in both but lost theirs.
+    // Operates per output-type so that nodes with partial connections (e.g. LLM
+    // generated "main" but dropped "error") still get their missing types restored.
+    for (const [srcName, srcConn] of Object.entries(origConnections)) {
+      if (!nodeNames.has(srcName)) continue;
+      const existingConn: any = connections[srcName] || {};
+      let changed = false;
+      const merged: any = { ...existingConn };
+      for (const [outputType, branches] of Object.entries(srcConn as any)) {
+        if (existingConn[outputType]) continue; // this output type already present — keep LLM version
+        const filteredBranches = (branches as any[][]).map((branch: any[]) =>
+          branch.filter((edge: any) => nodeNames.has(edge.node))
+        ).filter((branch: any[]) => branch.length > 0);
+        if (filteredBranches.length > 0) {
+          merged[outputType] = filteredBranches;
+          changed = true;
+        }
+      }
+      if (changed) connections[srcName] = merged;
+    }
+
+    // 2. Position-based chain stitching for nodes still missing outgoing main connections.
+    // Group nodes by approximate y-row (round to nearest 300px), sort each row by x.
+    // For any node with no outgoing main connection, wire it to the next node in its row.
+    const nodes: any[] = modified.nodes;
+
+    // 1b. Restore onError settings that the LLM may have stripped from nodes.
+    const origNodeMap = new Map<string, any>(
+      ((original?.nodes ?? []) as any[]).map((n: any) => [n.name, n])
+    );
+    for (const node of nodes) {
+      const orig = origNodeMap.get(node.name);
+      if (orig?.onError && !node.onError) {
+        node.onError = orig.onError;
+      }
+    }
+
+    // 1c. Wire error connections for any node with onError:"continueErrorOutput" that lacks one.
+    // Covers new nodes the LLM added to the flow (not present in original) — step 1 can't restore
+    // connections for those. Infer the error handler from what the original connected to.
+    const errorHandlerNodes = new Set<string>();
+    for (const srcConn of Object.values(origConnections)) {
+      for (const branch of ((srcConn as any).error ?? []) as any[][]) {
+        for (const edge of branch) {
+          if (nodeNames.has(edge.node)) errorHandlerNodes.add(edge.node);
+        }
+      }
+    }
+    if (errorHandlerNodes.size > 0) {
+      const errorHandler = [...errorHandlerNodes][0];
+      for (const node of nodes) {
+        if (node.onError !== 'continueErrorOutput') continue;
+        if (connections[node.name]?.error?.length > 0) continue;
+        connections[node.name] = {
+          ...(connections[node.name] || {}),
+          error: [[{ node: errorHandler, type: 'main', index: 0 }]],
+        };
+      }
+    }
+
+    // 1d. Remove LLM-hallucinated main connections from nodes that were terminal in the original.
+    // A node is terminal if it existed in the original but had no outgoing main connections there.
+    const origNodeNames = new Set(((original?.nodes ?? []) as any[]).map((n: any) => n.name));
+    for (const node of nodes) {
+      if (!origNodeNames.has(node.name)) continue; // new node — leave LLM connections alone
+      const origConn = origConnections[node.name];
+      const hadMain = (origConn?.main as any[][] | undefined)?.some((b: any[]) => b.length > 0);
+      if (!hadMain && connections[node.name]?.main?.length > 0) {
+        const nc = { ...(connections[node.name] || {}) };
+        delete nc.main;
+        if (Object.keys(nc).length > 0) {
+          connections[node.name] = nc;
+        } else {
+          delete connections[node.name];
+        }
+      }
+    }
+
+    const rowMap = new Map<number, any[]>();
+    for (const node of nodes) {
+      const x = node.position?.[0] ?? 0;
+      const y = node.position?.[1] ?? 0;
+      const rowKey = Math.round(y / 300) * 300;
+      if (!rowMap.has(rowKey)) rowMap.set(rowKey, []);
+      rowMap.get(rowKey)!.push({ ...node, _x: x });
+    }
+
+    for (const row of rowMap.values()) {
+      row.sort((a: any, b: any) => a._x - b._x);
+      for (let i = 0; i < row.length - 1; i++) {
+        const src = row[i];
+        const tgt = row[i + 1];
+        // Only stitch if this node has NO outgoing main connections yet
+        if (connections[src.name]?.main?.length > 0) continue;
+        connections[src.name] = {
+          ...(connections[src.name] || {}),
+          main: [[{ node: tgt.name, type: 'main', index: 0 }]],
+        };
+      }
+    }
+
+    return { ...modified, connections };
+  }
+
   async generateWorkflowFix(workflow: any, error: string, model?: string, _stream: boolean = false, validNodeTypes: string[] = []): Promise<any> {
     const nodeService = NodeDefinitionsService.getInstance();
     const staticRef = nodeService.getStaticReference();
@@ -322,7 +560,8 @@ export class AIService {
     
     try {
         const fixed = JSON.parse(jsonrepair(cleanJson));
-        return fixed.workflows?.[0] || fixed;
+        const result = fixed.workflows?.[0] || fixed;
+        return this.wireOrphanedErrorHandlers(this.fixHallucinatedNodes(this.repairConnections(result, workflow)));
     } catch (e) {
         console.error("Failed to parse fix JSON", e);
         return workflow;
@@ -391,6 +630,70 @@ export class AIService {
     });
 
     return this.fixN8nConnections(workflow);
+  }
+
+  /**
+   * Wire orphaned error-handler nodes that the LLM created but forgot to connect.
+   * Detects nodes with no incoming connections whose name suggests they are error
+   * handlers (contains "Error", "Cleanup", "Rollback", "Fallback", etc.) and wires
+   * every non-terminal, non-handler node's error output to them.
+   * Also sets onError:"continueErrorOutput" on each wired source node.
+   */
+  public wireOrphanedErrorHandlers(workflow: any): any {
+    if (!workflow?.nodes || !workflow?.connections) return workflow;
+
+    const nodes: any[] = workflow.nodes;
+    const connections: Record<string, any> = { ...(workflow.connections || {}) };
+
+    // Build set of nodes that have at least one incoming connection.
+    const hasIncoming = new Set<string>();
+    for (const srcConn of Object.values(connections)) {
+      for (const branches of Object.values(srcConn as any)) {
+        for (const branch of branches as any[][]) {
+          for (const edge of branch) {
+            if (edge?.node) hasIncoming.add(edge.node);
+          }
+        }
+      }
+    }
+
+    const TRIGGER_TYPES = /trigger|webhook|cron|schedule|interval|timer|poller|gmail|rss/i;
+    const ERROR_HANDLER_PATTERN = /error|cleanup|rollback|fallback|on.?fail|recover/i;
+
+    // Orphaned nodes = no incoming connection, not a trigger, name looks like an error handler.
+    const errorHandlers = nodes.filter(n =>
+      !hasIncoming.has(n.name) &&
+      !TRIGGER_TYPES.test(n.type || '') &&
+      ERROR_HANDLER_PATTERN.test(n.name)
+    );
+
+    if (errorHandlers.length === 0) return workflow;
+
+    // Non-terminal nodes = have at least one outgoing main connection.
+    const nonTerminal = new Set<string>();
+    for (const [srcName, srcConn] of Object.entries(connections)) {
+      const mainBranches = (srcConn as any).main as any[][] | undefined;
+      if (mainBranches?.some((b: any[]) => b.length > 0)) {
+        nonTerminal.add(srcName);
+      }
+    }
+
+    for (const handler of errorHandlers) {
+      const sources = nodes.filter(n =>
+        nonTerminal.has(n.name) &&
+        !ERROR_HANDLER_PATTERN.test(n.name) &&
+        !(connections[n.name]?.error?.length > 0)
+      );
+      for (const src of sources) {
+        src.onError = 'continueErrorOutput';
+        connections[src.name] = {
+          ...(connections[src.name] || {}),
+          error: [[{ node: handler.name, type: 'main', index: 0 }]],
+        };
+      }
+    }
+
+    return { ...workflow, connections };
   }
 
   public fixN8nConnections(workflow: any): any {
@@ -515,6 +818,68 @@ Return ONLY the replacement JavaScript code. No markdown fences, no explanation.
 
     const response = await this.generateContent(prompt, { temperature: 0.1 });
     return response.replace(/^```(?:javascript|js)?\n?|\n?```$/g, '').trim();
+  }
+
+  /**
+   * Analyze a validated working workflow and generate a reusable pattern file.
+   * Returns markdown content ready to save to docs/patterns/.
+   */
+  async generatePattern(workflowJson: any): Promise<{ content: string; slug: string }> {
+    const stripped = {
+      name: workflowJson.name,
+      nodes: (workflowJson.nodes || []).map((n: any) => ({
+        name: n.name,
+        type: n.type,
+        typeVersion: n.typeVersion,
+        parameters: n.parameters,
+      })),
+      connections: workflowJson.connections,
+    };
+
+    const prompt = `You are an n8n workflow expert analyzing a VALIDATED, WORKING n8n workflow.
+Your job is to extract the reusable knowledge from this workflow into a pattern file that will teach an AI engineer to build similar workflows correctly.
+
+Workflow JSON:
+${JSON.stringify(stripped, null, 2)}
+
+Generate a markdown pattern file with the following structure:
+
+1. First line MUST be: <!-- keywords: <comma-separated keywords> -->
+   - Keywords should cover: service names, operations, node types, integration categories
+   - Example: <!-- keywords: bigquery, google bigquery, sql, merge, staging, http request -->
+
+2. A short title: # Pattern: <descriptive title>
+
+3. ## Critical Rules
+   - List any gotchas, wrong approaches to avoid, or non-obvious choices made in this workflow
+   - Be specific: e.g. "Use n8n-nodes-base.httpRequest instead of n8n-nodes-base.googleBigQuery because..."
+   - If there are no critical rules, omit this section
+
+4. ## Authentication
+   - Document the credential type and any required scopes/permissions
+   - Only include if the workflow uses credentials
+
+5. One section per major technique demonstrated, e.g.:
+   ## <Technique Name>
+   - Explain what it does and why
+   - Include the relevant node config as a JSON code block (use actual values from the workflow, anonymize project IDs to YOUR_PROJECT etc.)
+   - Note any important parameter choices
+
+6. ## Error Handling (if the workflow has error paths)
+   - Explain the error handling strategy
+
+Keep the pattern focused and actionable. An AI reading this should be able to reproduce the technique correctly.
+Output ONLY the markdown content. No commentary before or after.`;
+
+    const content = await this.generateContent(prompt, { temperature: 0.3 });
+
+    // Derive a filename slug from the workflow name
+    const slug = (workflowJson.name || 'workflow')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+
+    return { content, slug };
   }
 
   async evaluateCandidates(goal: string, candidates: any[]): Promise<{ selectedIndex: number, reason: string }> {

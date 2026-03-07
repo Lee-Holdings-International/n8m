@@ -198,15 +198,18 @@ Two ways to create a fixture:
 # Pull real execution data from n8n (no test run required)
 n8m fixture capture <workflowId>
 
+# Browse local files + remote instance interactively
+n8m fixture capture
+
 # Scaffold an empty template to fill in by hand
 n8m fixture init <workflowId>
 ```
 
-**`capture`** connects to your n8n instance, fetches the 25 most recent
-executions for the workflow, and presents an interactive menu to pick which one
-to save as a fixture — no tests run. Use this when you have a workflow that
-already ran successfully in n8n and you want to lock in that execution data for
-offline testing going forward.
+**`capture`** connects to your n8n instance, fetches the most recent executions
+for the workflow, and presents an interactive menu to pick which one to save.
+You'll be prompted for a fixture name (e.g. `happy-path`, `missing-field`) and
+expected outcome (`pass` or `fail`). Fixtures are saved to
+`.n8m/fixtures/<workflowId>/<name>.json`.
 
 ```bash
 n8m fixture capture abc123
@@ -215,10 +218,19 @@ n8m fixture capture abc123
 # →   #177916  success  3/4/2026, 10:48:47 AM
 # →   #177914  success  3/4/2026, 10:48:23 AM
 # → ❯ #177913  error    3/4/2026, 10:47:59 AM
-# → Selected execution 177913
-# → Fixture saved to .n8m/fixtures/abc123.json
+# → Name this fixture (e.g. happy-path, missing-field, bad-auth): error-case
+# → Expected test outcome: fail
+# → Fixture saved to .n8m/fixtures/abc123/error-case.json
 # →   Workflow: My Workflow
 # →   Execution: error · 5 node(s) captured
+```
+
+Multiple named fixtures per workflow let you test different scenarios (happy
+path, edge cases, error handling) with one command:
+
+```bash
+n8m test --fixture .n8m/fixtures/abc123           # run ALL fixtures for a workflow
+n8m test --fixture .n8m/fixtures/abc123/error-case.json  # run one specific fixture
 ```
 
 **`init`** creates an empty template when you want to define the fixture data
@@ -230,6 +242,8 @@ yourself, without needing a live execution first.
   "version": "1.0",
   "workflowId": "abc123",
   "workflowName": "My Workflow",
+  "description": "happy-path",
+  "expectedOutcome": "pass",
   "workflow": { "name": "My Workflow", "nodes": [], "connections": {} },
   "execution": {
     "status": "success",
@@ -249,7 +263,7 @@ Fill in `execution.data.resultData.runData` with the actual output of each node
 (keyed by exact node name). Then test against it:
 
 ```bash
-n8m test --fixture .n8m/fixtures/abc123.json
+n8m test --fixture .n8m/fixtures/abc123/happy-path.json
 ```
 
 Fixture files are project-local (`.n8m/fixtures/`) and should be committed to
@@ -267,6 +281,117 @@ n8m deploy ./workflows/my-flow.json
 
 # Activate the workflow immediately after deployment
 n8m deploy ./workflows/my-flow.json --activate
+```
+
+---
+
+### `n8m learn` — Build the pattern library
+
+Extract reusable engineering knowledge from validated workflows and store it so
+the AI engineer applies the same proven techniques in future generations.
+
+```bash
+# Interactive: pick a workflow from ./workflows/
+n8m learn
+
+# Learn from a specific workflow
+n8m learn ./workflows/my-flow/workflow.json
+
+# Batch-generate patterns for every workflow in the directory
+n8m learn --all
+
+# Import patterns from a GitHub archive (awesome-n8n style)
+n8m learn --github owner/repo
+n8m learn --github owner/repo@main --github-path patterns/google
+n8m learn --github owner/repo --token ghp_xxx   # or set GITHUB_TOKEN env var
+```
+
+**How it works:**
+
+- **Local mode**: The AI reads a validated workflow JSON, identifies the
+  techniques it demonstrates, extracts critical rules (including gotchas to
+  avoid), and writes a `.md` pattern file to `.n8m/patterns/`.
+- **GitHub mode**: Fetches `.md` pattern files from any public GitHub repo via
+  the GitHub API. Shows a checkbox menu so you choose exactly which patterns to
+  import. Recurses into subdirectories automatically.
+
+Patterns are Markdown files with a `<!-- keywords: ... -->` comment. When you
+run `n8m create`, the engineer searches all pattern files and injects any that
+match the workflow's goal into the prompt — teaching it to reproduce proven
+approaches exactly.
+
+```
+.n8m/patterns/          ← your project-local library (user patterns)
+docs/patterns/          ← built-in patterns shipped with n8m
+```
+
+User patterns in `.n8m/patterns/` take priority over built-in patterns. A
+pattern file with the same filename overrides the built-in version, so you can
+customize any default.
+
+**Contributing default patterns** (for n8m maintainers):
+
+```bash
+# Generate docs/patterns/ from every workflow in ./workflows/
+npm run generate-patterns
+
+# Overwrite any already-existing pattern files
+npm run generate-patterns -- --overwrite
+
+# Preview what would be written without touching the filesystem
+npm run generate-patterns -- --dry-run
+```
+
+The script scans `workflows/` recursively, calls the AI on each `workflow.json`,
+and writes the result to `docs/patterns/<slug>.md`. Patterns in `docs/patterns/`
+are included in the npm package and available to all users automatically.
+
+**Pattern file format:**
+
+```markdown
+<!-- keywords: bigquery, google bigquery, sql, merge, http request -->
+
+# Pattern: BigQuery Operations via HTTP Request
+
+## Critical Rules
+- NEVER use n8n-nodes-base.googleBigQuery — it returns no output for DDL/DML.
+  Always use n8n-nodes-base.httpRequest with the BigQuery REST API.
+
+## DDL / DML Queries
+...
+```
+
+---
+
+### `n8m mcp` — Launch the MCP server
+
+Expose `n8m`'s agentic capabilities as tools to any
+[Model Context Protocol](https://modelcontextprotocol.io/) client (Claude
+Desktop, Cursor, etc.).
+
+```bash
+n8m mcp
+# → Starting n8m MCP Server...
+```
+
+The server runs over stdio and registers two tools:
+
+| Tool | Description |
+|---|---|
+| `create_workflow` | Generate an n8n workflow from a natural-language goal |
+| `test_workflow` | Deploy a workflow ephemerally to n8n and validate it |
+
+Add it to your MCP client config (e.g. Claude Desktop's `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "n8m": {
+      "command": "npx",
+      "args": ["n8m", "mcp"]
+    }
+  }
+}
 ```
 
 ---
@@ -330,8 +455,8 @@ n8m config
 Developer → n8m create "..."
                │
                ▼
-        ┌─────────────┐
-        │  Architect  │  Designs the workflow blueprint
+        ┌─────────────┐      .n8m/patterns/    docs/patterns/
+        │  Architect  │  ◄── RAG: node defs + matched patterns
         └──────┬──────┘
                │
                ▼
@@ -345,10 +470,18 @@ Developer → n8m create "..."
         └──────┬──────┘       └─────────────┘
                │ passed
                ▼
-                ▼
         ./workflows/<slug>/
            ├── workflow.json
            └── README.md (with Mermaid diagram)
+
+
+Developer → n8m learn <workflow.json>
+               │
+               ▼
+          AI analyzes validated workflow
+               │
+               ▼
+        .n8m/patterns/<slug>.md  ← feeds back into Engineer on next create
 ```
 
 - **Local first**: credentials and workflow files live on your machine
@@ -358,6 +491,8 @@ Developer → n8m create "..."
 - **HITL pauses**: the agent stops for your review before committing
 - **Bring your own AI**: works with OpenAI, Claude, Gemini, Ollama, or any
   OpenAI-compatible API
+- **Self-improving**: every validated workflow you `learn` from strengthens
+  future generations
 
 > **For developers**: See the [Developer Guide](docs/DEVELOPER_GUIDE.md) for a
 > deep-dive into the agentic graph internals, RAG implementation, how to add new
@@ -405,5 +540,8 @@ npm run dev
 - [x] Multi-workflow project generation support
 - [x] Fixture record & replay — offline testing with real execution data
 - [x] Hand-crafted fixture scaffolding (`n8m fixture init`) with JSON Schema
+- [x] Pattern library — extract & reuse knowledge from validated workflows (`n8m learn`)
+- [x] GitHub pattern archive import (`n8m learn --github owner/repo`)
+- [x] MCP server — expose n8m as tools for Claude Desktop and other MCP clients
 - [ ] Native n8n canvas integration
 - [ ] Multi-agent collaboration on a single goal

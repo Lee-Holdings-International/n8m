@@ -44,6 +44,9 @@ n8m/
 │   │   ├── test.ts
 │   │   ├── deploy.ts
 │   │   ├── doc.ts
+│   │   ├── fixture.ts        # capture/init sub-commands for offline fixtures
+│   │   ├── learn.ts          # extract pattern knowledge from validated workflows
+│   │   ├── mcp.ts            # MCP server entry point
 │   │   ├── resume.ts
 │   │   ├── prune.ts
 │   │   └── config.ts
@@ -57,6 +60,7 @@ n8m/
 │   │   ├── n8nClient.ts      # n8n REST API client
 │   │   ├── config.ts         # Config file management
 │   │   ├── theme.ts          # CLI formatting/theming
+│   │   ├── fixtureManager.ts # Read/write .n8m/fixtures/ (single-file + directory)
 │   │   └── sandbox.ts        # Isolated script runner for custom QA tools
 │   └── resources/
 │       └── node-definitions-fallback.json  # Static node schema fallback
@@ -230,6 +234,8 @@ OpenAI-compatible API (Ollama, Groq, etc.).
 | `generateWorkflowFix(workflow, errors, model?)` | Sends a failing workflow + error list to the LLM for repair.                         |
 | `evaluateCandidates(goal, candidates)`          | AI picks the best candidate workflow from the list.                                  |
 | `generateTestScenarios(workflowJson, goal)`     | Returns 3 test payloads: happy path, edge case, error case.                          |
+| `evaluateTestError(error, nodes, failingNode)`  | Classifies a live test failure and returns a `TestErrorEvaluation` describing what action to take. Used by the self-healing loop in `test.ts` and `qa.ts`. |
+| `inferBinaryFieldName(predecessorNode)`         | Given a Code node that produces binary output, reads its `jsCode` and asks the AI what the binary field name is. Returns `string \| null`. |
 | `fixHallucinatedNodes(workflow)`                | Corrects known-bad node type strings (e.g. `rssFeed` → `rssFeedRead`).               |
 | `validateAndShim(workflow, validNodeTypes)`     | Replaces truly unknown node types with safe shims (`n8n-nodes-base.set`).            |
 
@@ -310,16 +316,19 @@ All commands are built with [oclif](https://oclif.io/) and live in
 `src/commands/`. They handle user I/O and then delegate to the agentic graph or
 services.
 
-| Command  | File        | Description                                                                                                          |
-| -------- | ----------- | -------------------------------------------------------------------------------------------------------------------- |
-| `create` | `create.ts` | Runs `runAgenticWorkflowStream()`, handles HITL prompts, organizes output into project folders, auto-generates docs. |
-| `modify` | `modify.ts` | Loads an existing workflow, builds a modification goal, passes to `runAgenticWorkflow()`.                            |
-| `test`   | `test.ts`   | Resolves sub-workflow dependencies, runs the agentic validator/repairer, handles ephemeral deploy/cleanup.           |
-| `deploy` | `deploy.ts` | Directly pushes a local JSON to the n8n instance.                                                                    |
-| `doc`    | `doc.ts`    | Uses `DocService` to generate Mermaid diagrams + AI summaries, organizes loose files into project folders.           |
-| `resume` | `resume.ts` | Resumes a paused graph session by thread ID from the SQLite checkpointer.                                            |
-| `prune`  | `prune.ts`  | Deletes `[n8m:test:*]` prefixed workflows from the n8n instance.                                                     |
-| `config` | `config.ts` | Reads/writes `~/.n8m/config.json`.                                                                                   |
+| Command   | File          | Description                                                                                                          |
+| --------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `create`  | `create.ts`   | Runs `runAgenticWorkflowStream()`, handles HITL prompts, organizes output into project folders, auto-generates docs. |
+| `modify`  | `modify.ts`   | Loads an existing workflow, builds a modification goal, passes to `runAgenticWorkflow()`.                            |
+| `test`    | `test.ts`     | Resolves sub-workflow dependencies, runs the agentic validator/repairer, handles ephemeral deploy/cleanup. Also drives the offline fixture replay loop. |
+| `deploy`  | `deploy.ts`   | Directly pushes a local JSON to the n8n instance.                                                                    |
+| `doc`     | `doc.ts`      | Uses `DocService` to generate Mermaid diagrams + AI summaries, organizes loose files into project folders.           |
+| `fixture` | `fixture.ts`  | Two sub-commands: `capture` (pull real execution data from n8n → named fixture) and `init` (scaffold empty template). Fixtures stored in `.n8m/fixtures/<workflowId>/<name>.json`. |
+| `learn`   | `learn.ts`    | Extracts reusable patterns from validated workflow JSON and writes `.md` pattern files to `.n8m/patterns/`. Also supports `--github owner/repo` to import patterns from a public GitHub archive. |
+| `mcp`     | `mcp.ts`      | Launches the MCP (Model Context Protocol) server over stdio, exposing `create_workflow` and `test_workflow` as tools for Claude Desktop and other MCP clients. |
+| `resume`  | `resume.ts`   | Resumes a paused graph session by thread ID from the SQLite checkpointer.                                            |
+| `prune`   | `prune.ts`    | Deletes `[n8m:test:*]` prefixed workflows from the n8n instance.                                                     |
+| `config`  | `config.ts`   | Reads/writes `~/.n8m/config.json`.                                                                                   |
 
 ### Project Folder Output
 
@@ -408,6 +417,139 @@ n8m config --ai-base-url https://api.my-provider.com/v1 --ai-key <key> --ai-mode
 
 For non-compatible APIs, implement a new private call method in `AIService`
 (similar to `callAnthropicNative`) and route to it in `generateContent()`.
+
+---
+
+## Self-Healing Test Loop
+
+Both `src/commands/test.ts` (`testRemoteWorkflowDirectly`) and
+`src/agentic/nodes/qa.ts` implement the same AI-powered repair cycle:
+
+```
+1. Fire webhook / execute workflow
+2. Poll for execution result
+3. On failure → call AIService.evaluateTestError(error, nodes, failingNodeName)
+4. Dispatch on returned action:
+   ├── fix_node/code_node_js     → patch JS syntax in the Code node's jsCode
+   ├── fix_node/execute_command  → patch shell script in Execute Command node
+   ├── fix_node/binary_field     → correct a wrong binary field name (see below)
+   ├── regenerate_payload        → ask AI to produce a new test input payload
+   ├── structural_pass           → test environment limitation; mark as pass
+   └── escalate                  → fundamental design flaw; abort with message
+5. Apply fix, redeploy, retry
+```
+
+### `TestErrorEvaluation` interface
+
+```typescript
+// src/services/ai.service.ts
+export interface TestErrorEvaluation {
+  action: 'fix_node' | 'regenerate_payload' | 'structural_pass' | 'escalate';
+  nodeFixType?: 'code_node_js' | 'execute_command' | 'binary_field';
+  targetNodeName?: string;
+  suggestedBinaryField?: string;
+  reason: string;
+}
+```
+
+### Binary field fix flow
+
+When `nodeFixType === 'binary_field'` (error: `"has no binary field 'X'"`):
+
+1. Find the predecessor node via the workflow's `connections` map.
+2. If predecessor is an **HTTP Request** node → use `'data'` (always correct).
+3. If predecessor is a **Code node** → call `AIService.inferBinaryFieldName(node)`,
+   which reads `jsCode` and asks the AI what the binary field is called.
+4. Any other predecessor type → `structural_pass` (can't determine field).
+5. After **any** `binary_field` fix attempt, a subsequent binary error on the
+   same run → `structural_pass` (avoids infinite loops in test environments
+   that don't support binary pin injection).
+
+---
+
+## Fixture Infrastructure
+
+Fixtures are managed by `src/utils/fixtureManager.ts` (`FixtureManager` class).
+
+### Storage format
+
+```
+.n8m/fixtures/
+  <workflowId>/          ← new multi-fixture directory (one file per scenario)
+    happy-path.json
+    error-case.json
+  <workflowId>.json      ← legacy single-file format (still supported for reads)
+```
+
+`FixtureManager.loadAll(workflowId)` prefers the directory format, falling back
+to the single legacy file if no directory exists.
+
+### `WorkflowFixture` schema
+
+```typescript
+interface WorkflowFixture {
+  version: '1.0';
+  capturedAt: string;         // ISO timestamp
+  workflowId: string;
+  workflowName: string;
+  description?: string;       // human label, e.g. "happy-path"
+  expectedOutcome?: 'pass' | 'fail';  // default: 'pass'
+  workflow: any;              // full workflow JSON
+  execution: {
+    id?: string;
+    status: string;
+    startedAt?: string;
+    data: {
+      resultData: {
+        error?: any;
+        runData: Record<string, any[]>;  // keyed by exact node name
+      };
+    };
+  };
+}
+```
+
+### Key methods
+
+| Method | Description |
+|---|---|
+| `exists(workflowId)` | Returns `true` if any fixture (directory or legacy file) exists for the workflow. |
+| `loadAll(workflowId)` | Returns all fixtures for a workflow as an array; used by `test.ts` to run every scenario. |
+| `load(workflowId)` | Legacy: loads the single `.n8m/fixtures/<workflowId>.json` file. |
+| `loadFromPath(filePath)` | Loads a fixture from an explicit path (used with `--fixture` flag). |
+| `saveNamed(fixture, name)` | Saves to the per-workflow directory (new multi-fixture format). |
+| `save(fixture)` | Legacy single-file save; used by `offerSaveFixture` after live test runs. |
+| `getCapturedDate(workflowId)` | Returns the most recent `capturedAt` date across all fixtures. |
+
+---
+
+## MCP Server
+
+`src/services/mcp.service.ts` implements an MCP server using the
+`@modelcontextprotocol/sdk` package with a **stdio transport**.
+
+```
+Claude Desktop / Cursor / other MCP client
+        │  stdio
+        ▼
+  MCPService (n8m-agent)
+    ├── create_workflow(goal)   → runAgenticWorkflow(goal)
+    └── test_workflow(workflowJson, goal) → deploys + validates ephemerally
+```
+
+The server runs as a long-lived process started by `n8m mcp`. It does not use
+the HITL interrupt mechanism (no interactive prompts), so workflow generation
+runs fully autonomously.
+
+To integrate with Claude Desktop, add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "n8m": { "command": "npx", "args": ["n8m", "mcp"] }
+  }
+}
+```
 
 ---
 

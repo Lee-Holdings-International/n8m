@@ -15,6 +15,7 @@
   "files": [
     "bin",
     "dist",
+    "docs",
     "oclif.manifest.json"
   ],
   "dependencies": {
@@ -94,6 +95,7 @@
     "n8m": "./bin/run.js",
     "start": "npm run build && ./bin/run.js",
     "dev": "tsc -b -w",
+    "generate-patterns": "tsx scripts/generate-patterns.ts",
     "version": "oclif readme && git add README.md"
   }
 }

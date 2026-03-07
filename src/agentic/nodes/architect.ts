@@ -14,7 +14,11 @@ export const architectNode = async (state: typeof TeamState.State) => {
   // parallel engineers (via Send) to rebuild the workflow from scratch, which
   // produces very large JSON that is error-prone and throws away the user's work.
   if (state.workflowJson) {
-    return {};
+    const plan = await aiService.generateModificationPlan(state.userGoal, state.workflowJson);
+    return {
+      spec: plan,
+      collaborationLog: [`Architect: Modification plan — ${plan.description}`],
+    };
   }
 
   try {

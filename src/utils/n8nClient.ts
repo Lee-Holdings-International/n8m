@@ -168,14 +168,57 @@ export class N8nClient {
    */
   async updateWorkflow(workflowId: string, workflowData: unknown): Promise<void> {
     try {
-      const sanitized = this.sanitizeSettings(workflowData as Record<string, unknown>);
-      const response = await fetch(`${this.apiUrl}/workflows/${workflowId}`, {
-        body: JSON.stringify(sanitized),
-        headers: this.headers,
-        method: 'PUT',
-      })
+      const w = workflowData as Record<string, unknown>;
+      const settings = { ...(w.settings as Record<string, unknown> || {}) };
+      delete settings.timezone;
 
-      await this.assertOk(response, 'update workflow')
+      const SAFE_NODE_PROPS = new Set([
+        'id', 'name', 'type', 'typeVersion', 'position', 'parameters',
+        'credentials', 'disabled', 'webhookId', 'notes', 'notesInFlow',
+        'continueOnFail', 'alwaysOutputData', 'executeOnce', 'retryOnFail',
+        'maxTries', 'waitBetweenTries',
+      ]);
+
+      const buildPayload = (sanitizeNodes: boolean, includeVersionId: boolean) => {
+        const nodes = sanitizeNodes
+          ? ((w.nodes as any[]) || []).map((node: any) => {
+              const clean: Record<string, unknown> = {};
+              for (const key of Object.keys(node)) {
+                if (SAFE_NODE_PROPS.has(key)) clean[key] = node[key];
+              }
+              return clean;
+            })
+          : w.nodes;
+        const payload: Record<string, unknown> = {
+          name: w.name,
+          nodes,
+          connections: w.connections,
+          settings,
+        };
+        if (includeVersionId && w.versionId) payload.versionId = w.versionId;
+        return payload;
+      };
+
+      const attempts = [
+        buildPayload(false, true),   // full nodes + versionId
+        buildPayload(true, true),    // sanitized nodes + versionId
+        buildPayload(true, false),   // sanitized nodes, no versionId
+      ];
+
+      let response!: Response;
+      let errorText = '';
+      for (const payload of attempts) {
+        response = await fetch(`${this.apiUrl}/workflows/${workflowId}`, {
+          body: JSON.stringify(payload),
+          headers: this.headers,
+          method: 'PUT',
+        });
+        if (response.ok) return;
+        errorText = await response.text();
+        if (response.status !== 400 || !errorText.includes('additional properties')) break;
+      }
+
+      throw new Error(`update workflow failed: ${response.status} - ${errorText}`);
     } catch (error) {
       throw new Error(`Failed to update workflow: ${(error as Error).message}`)
     }
@@ -217,10 +260,16 @@ export class N8nClient {
    */
   async createWorkflow(name: string, workflowData: unknown): Promise<{id: string}> {
     try {
-      const payload = this.sanitizeSettings({
+      const w = workflowData as Record<string, unknown>;
+      const settings = { ...(w.settings as Record<string, unknown> || {}) };
+      delete settings.timezone;
+
+      const payload: Record<string, unknown> = {
         name,
-        ...(workflowData as Record<string, unknown>),
-      })
+        nodes: w.nodes ?? [],
+        connections: w.connections ?? {},
+        settings,
+      };
 
       const response = await fetch(`${this.apiUrl}/workflows`, {
         body: JSON.stringify(payload),
@@ -311,7 +360,7 @@ export class N8nClient {
           
       } while (cursor);
 
-      return allWorkflows;
+      return allWorkflows.filter((w: any) => !w.isArchived);
     } catch (error) {
       throw new Error(`Failed to fetch workflows: ${(error as Error).message}`)
     }
@@ -569,6 +618,7 @@ export class N8nClient {
           mode: 'runOnceForAllItems',
           jsCode: N8nClient.buildNetworkShimCode(node.type),
         },
+        ...(node.onError ? { onError: node.onError } : {}),
       };
     });
   }

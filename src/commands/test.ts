@@ -412,30 +412,43 @@ export default class Test extends Command {
 
           const fixtureFlagPath = flags['fixture'];
           if (fixtureFlagPath) {
-              // --fixture flag: load from explicit path, run offline immediately (no prompt)
-              const fixture = fixtureManager.loadFromPath(fixtureFlagPath);
-              if (!fixture) {
-                  this.log(theme.fail(`Could not load fixture from: ${fixtureFlagPath}`));
-                  return;
+              // --fixture flag: directory = run all as suite; file = single fixture
+              const { statSync } = await import('fs');
+              let isDir = false;
+              try { isDir = statSync(fixtureFlagPath).isDirectory(); } catch { /* not found */ }
+
+              if (isDir) {
+                  directResult = await this.runFixtureSuite(fixtureFlagPath, fixtureManager, workflowName, aiService);
+              } else {
+                  const fixture = fixtureManager.loadFromPath(fixtureFlagPath);
+                  if (!fixture) {
+                      this.log(theme.fail(`Could not load fixture from: ${fixtureFlagPath}`));
+                      return;
+                  }
+                  directResult = await this.testWithFixture(fixture, workflowName, aiService);
               }
-              directResult = await this.testWithFixture(fixture, workflowName, aiService);
           } else {
               const capturedDate = fixtureManager.getCapturedDate(rootRealTargetId);
               if (capturedDate && !validateOnly) {
+                  const allFixtures = fixtureManager.loadAll(rootRealTargetId);
                   const dateStr = capturedDate.toLocaleString('en-US', {
                       year: 'numeric', month: 'short', day: 'numeric',
                       hour: '2-digit', minute: '2-digit',
                   });
+                  const caseLabel = allFixtures.length === 1 ? '1 fixture' : `${allFixtures.length} fixture cases`;
                   const { useFixture } = await inquirer.prompt([{
                       type: 'confirm',
                       name: 'useFixture',
-                      message: `Fixture found from ${dateStr}. Run offline?`,
+                      message: `${caseLabel} found from ${dateStr}. Run offline?`,
                       default: true,
                   }]);
 
                   if (useFixture) {
-                      const fixture = fixtureManager.load(rootRealTargetId)!;
-                      directResult = await this.testWithFixture(fixture, workflowName, aiService);
+                      if (allFixtures.length === 1) {
+                          directResult = await this.testWithFixture(allFixtures[0], workflowName, aiService);
+                      } else {
+                          directResult = await this.runFixtureSuiteFromList(allFixtures, workflowName, aiService);
+                      }
                   } else {
                       directResult = await this.testRemoteWorkflowDirectly(
                           rootRealTargetId, workflowData, workflowName, client, aiService, n8nUrl!, testScenarios
@@ -450,8 +463,12 @@ export default class Test extends Command {
                   }
               } else if (capturedDate && validateOnly) {
                   // validate-only + fixture: use fixture silently (no prompt)
-                  const fixture = fixtureManager.load(rootRealTargetId)!;
-                  directResult = await this.testWithFixture(fixture, workflowName, aiService);
+                  const allFixtures = fixtureManager.loadAll(rootRealTargetId);
+                  if (allFixtures.length === 1) {
+                      directResult = await this.testWithFixture(allFixtures[0], workflowName, aiService);
+                  } else {
+                      directResult = await this.runFixtureSuiteFromList(allFixtures, workflowName, aiService);
+                  }
               } else {
                   directResult = await this.testRemoteWorkflowDirectly(
                       rootRealTargetId, workflowData, workflowName, client, aiService, n8nUrl!, testScenarios
@@ -641,7 +658,7 @@ export default class Test extends Command {
       return { ...workflowData, nodes, connections };
   }
 
-  private async saveWorkflows(deployedDefinitions: Map<string, any>, _originalPath?: string) {
+  private async saveWorkflows(deployedDefinitions: Map<string, any>, originalPath?: string) {
       if (deployedDefinitions.size === 0) return;
       const { save } = await inquirer.prompt([{
           type: 'confirm',
@@ -654,7 +671,7 @@ export default class Test extends Command {
       const docService = DocService.getInstance();
       for (const [, def] of deployedDefinitions.entries()) {
           const cleanData = this.sanitizeWorkflow(this.stripShim(def.data));
-          
+
           // Use AI to suggest title if it looks like a temporary name
           let workflowName = def.name;
           if (workflowName.startsWith('[n8m:test]') || workflowName.includes('Agentic_Test')) {
@@ -671,8 +688,22 @@ export default class Test extends Command {
               type: 'input',
               name: 'confirmPath',
               message: `Save '${workflowName}' to:`,
-              default: targetPath
+              default: originalPath ?? targetPath
           }]);
+
+          // Restore the original deployed ID if we're overwriting an existing file,
+          // so the ephemeral test ID doesn't replace the production deployment link.
+          const resolvedConfirmPath = path.resolve(confirmPath);
+          const resolvedOriginal = originalPath ? path.resolve(originalPath) : null;
+          if (resolvedConfirmPath === resolvedOriginal && originalPath) {
+              try {
+                  const existing = JSON.parse(await fs.readFile(originalPath, 'utf-8'));
+                  if (existing.id) cleanData.id = existing.id;
+              } catch { /* original file unreadable — leave cleanData as-is */ }
+          } else if (!resolvedOriginal) {
+              // New file — strip ephemeral ID so next deploy creates fresh
+              delete cleanData.id;
+          }
 
           try {
               await fs.mkdir(path.dirname(confirmPath), { recursive: true });
@@ -1303,13 +1334,26 @@ Previous error: "${errSnapshot}"`;
               }
               // Remove injected shim nodes and restore original connections.
               if (preShimNodes !== null) {
+                  // Merge: restore original node definitions for shimmed nodes, but keep
+                  // any legitimate Code node repairs that happened during the test run.
+                  const restoredNodes = preShimNodes.map((originalNode: any) => {
+                      const currentNode = currentWorkflow.nodes.find((n: any) => n.id === originalNode.id);
+                      if (!currentNode) return originalNode;
+                      const isShimReplacement = currentNode.type === 'n8n-nodes-base.code' &&
+                          typeof currentNode.parameters?.jsCode === 'string' &&
+                          currentNode.parameters.jsCode.startsWith('// [n8m:shim]');
+                      return isShimReplacement ? originalNode : currentNode;
+                  });
                   try {
                       await client.updateWorkflow(workflowId, {
                           name: currentWorkflow.name,
-                          nodes: preShimNodes,
+                          nodes: restoredNodes,
                           connections: preShimConnections,
                           settings: currentWorkflow.settings || {},
                       });
+                      // Also restore in-memory so finalWorkflow/saveWorkflows gets production nodes
+                      currentWorkflow.nodes = restoredNodes;
+                      currentWorkflow.connections = preShimConnections;
                   } catch { /* restore best-effort */ }
               }
               if (!wasActive) {
@@ -1659,6 +1703,62 @@ Previous error: "${errSnapshot}"`;
   // Fixture helpers
   // ---------------------------------------------------------------------------
 
+  /** Run all fixture files in a directory as a suite. */
+  private async runFixtureSuite(
+      dirPath: string,
+      fixtureManager: FixtureManager,
+      workflowName: string,
+      aiService: AIService,
+  ): Promise<{ passed: boolean; errors: string[]; finalWorkflow?: any; lastExecution?: any }> {
+      const { readdirSync } = await import('fs');
+      const files = readdirSync(dirPath).filter((f: string) => f.endsWith('.json')).sort();
+      if (files.length === 0) {
+          this.log(theme.fail(`No fixture files found in ${dirPath}`));
+          return { passed: false, errors: ['No fixture files found'] };
+      }
+      const fixtures: WorkflowFixture[] = files.flatMap((f: string) => {
+          const loaded = fixtureManager.loadFromPath(path.join(dirPath, f));
+          return loaded ? [loaded] : [];
+      });
+      return this.runFixtureSuiteFromList(fixtures, workflowName, aiService);
+  }
+
+  /** Run an in-memory list of fixtures as a suite and print a summary. */
+  private async runFixtureSuiteFromList(
+      fixtures: WorkflowFixture[],
+      workflowName: string,
+      aiService: AIService,
+  ): Promise<{ passed: boolean; errors: string[]; finalWorkflow?: any; lastExecution?: any }> {
+      this.log(theme.subHeader(`Running ${fixtures.length} fixture case(s) for ${workflowName}`));
+
+      const results: Array<{ label: string; passed: boolean; error?: string }> = [];
+
+      for (const fixture of fixtures) {
+          const label = fixture.description ?? fixture.execution?.status ?? 'case';
+          const expected = fixture.expectedOutcome ?? 'pass';
+          this.log(`\n${theme.label('Case')} ${theme.value(label)}  ${theme.muted(`(expected: ${expected})`)}`);
+          const result = await this.testWithFixture(fixture, workflowName, aiService);
+          results.push({ label, passed: result.passed, error: result.errors[0] });
+      }
+
+      // Summary table
+      this.log(`\n${theme.subHeader('Suite Results')}`);
+      let suitePass = true;
+      for (const r of results) {
+          if (r.passed) {
+              this.log(`  ${theme.done(r.label)}`);
+          } else {
+              this.log(`  ${theme.fail(r.label)}${r.error ? theme.muted(`  — ${r.error}`) : ''}`);
+              suitePass = false;
+          }
+      }
+      const passCount = results.filter(r => r.passed).length;
+      this.log(`\n${theme.label('Total')} ${theme.value(`${passCount}/${results.length} passed`)}`);
+
+      const allErrors = results.filter(r => !r.passed).map(r => r.error ?? r.label);
+      return { passed: suitePass, errors: allErrors };
+  }
+
   private async offerSaveFixture(
       fixtureManager: FixtureManager,
       workflowId: string,
@@ -1744,8 +1844,20 @@ Previous error: "${errSnapshot}"`;
               : null;
       }
 
+      const expectedOutcome = fixture.expectedOutcome ?? 'pass';
+
       if (!fixtureError) {
+          if (expectedOutcome === 'fail') {
+              const msg = `Expected execution to fail, but it succeeded.`;
+              this.log(theme.fail(msg));
+              return { passed: false, errors: [msg], finalWorkflow: currentWorkflow };
+          }
           this.log(theme.done('Offline fixture: execution was successful.'));
+          return { passed: true, errors: [], finalWorkflow: currentWorkflow };
+      }
+
+      if (expectedOutcome === 'fail') {
+          this.log(theme.done(`Expected failure confirmed: ${fixtureError}`));
           return { passed: true, errors: [], finalWorkflow: currentWorkflow };
       }
 

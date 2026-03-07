@@ -18,8 +18,14 @@ export const engineerNode = async (state: typeof TeamState.State) => {
   const relevantDefs = nodeService.search(queryText, 8);
   const staticRef = nodeService.getStaticReference();
   
-  const ragContext = (relevantDefs.length > 0 || staticRef)
-      ? `\n\n[N8N NODE REFERENCE GUIDE]\n${staticRef}\n\n[AVAILABLE NODE SCHEMAS - USE THESE EXACT PARAMETERS]\n${nodeService.formatForLLM(relevantDefs)}` 
+  // Search pattern library for proven working examples
+  const matchedPatterns = nodeService.searchPatterns(queryText);
+  const patternsContext = matchedPatterns.length > 0
+      ? `\n\n[PROVEN WORKFLOW PATTERNS - FOLLOW THESE EXACTLY]\n${matchedPatterns.join('\n\n---\n\n')}`
+      : "";
+
+  const ragContext = (relevantDefs.length > 0 || staticRef || matchedPatterns.length > 0)
+      ? `\n\n[N8N NODE REFERENCE GUIDE]\n${staticRef}\n\n[AVAILABLE NODE SCHEMAS - USE THESE EXACT PARAMETERS]\n${nodeService.formatForLLM(relevantDefs)}${patternsContext}`
       : "";
 
   // Self-Correction Loop Check
@@ -74,9 +80,21 @@ export const engineerNode = async (state: typeof TeamState.State) => {
       }
   }
 
-  // Pass-through if workflow exists and no errors (Initial pass for existing workflow)
+  // Modification mode: existing workflow + spec from architect
   if (state.workflowJson) {
-      return {};
+      if (!state.spec) {
+          return {}; // No plan — nothing to do
+      }
+
+      const modifiedWorkflow = await aiService.applyModification(
+          state.workflowJson,
+          state.userGoal,
+          state.spec,
+          state.userFeedback,
+          state.availableNodeTypes || []
+      );
+
+      return { workflowJson: modifiedWorkflow };
   }
 
   // Standard Creation Flow
@@ -108,6 +126,31 @@ export const engineerNode = async (state: typeof TeamState.State) => {
           - Use "n8n-nodes-base.htmlExtract" for HTML/Cheerio extraction.
        6. Connections Structure: The "connections" object keys MUST BE THE SOURCE NODE NAME. The "node" field inside the connection array MUST BE THE TARGET NODE NAME.
        7. Connection Nesting: Ensure the correct n8n connection structure: "SourceNodeName": { "main": [ [ { "node": "TargetNodeName", "type": "main", "index": 0 } ] ] }.
+       8. Error Connections: In addition to "main", nodes support an "error" output that fires when a node fails. Use this for error handling and cleanup flows. Example:
+          "NodeThatMightFail": {
+            "main": [ [ { "node": "NextNode", "type": "main", "index": 0 } ] ],
+            "error": [ [ { "node": "CleanupOrErrorHandler", "type": "main", "index": 0 } ] ]
+          }
+          Any node that could fail mid-workflow AND where partial execution would leave side effects (e.g. temporary DB tables, uploaded files, open transactions) MUST have an error connection to a cleanup node.
+       9. HTTP Request Configuration: The method determines required fields.
+          - GET/DELETE: only "url" (and optional "sendQuery"/"sendHeaders") are needed — do NOT include "sendBody".
+          - POST/PUT/PATCH: MUST include "sendBody": true AND a "body" object:
+            { "method": "POST", "url": "...", "sendBody": true, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json) }}" }
+          - Authentication: use "authentication": "predefinedCredentialType" + "nodeCredentialType": "<CredentialTypeName>" for service credentials.
+          - Minimal config: only include fields relevant to the method. Do not add empty optional fields.
+       10. Resource/Operation Nodes (Slack, Google Sheets, Airtable, Gmail, etc.): The "resource" + "operation" pair together determine which parameters are required. Different operations need different fields:
+          - post/create operations typically need target identifiers (channel, spreadsheetId, etc.) and content fields.
+          - update/patch operations typically need a record ID (messageId, rowId, etc.) and the fields to update.
+          - get/list operations typically need filter/search parameters, not content fields.
+          Always set both "resource" and "operation" first, then configure only the fields that operation requires.
+       11. Credentials Format: Credential references must follow this structure:
+          "credentials": { "<credentialTypeName>": { "id": "CREDENTIAL_ID", "name": "Human Readable Name" } }
+          Use the exact credential type name that matches the node (e.g. "slackApi", "googleSheetsOAuth2Api", "googleBigQueryOAuth2Api").
+          For Google services, prefer service account credentials over OAuth2 when available:
+          - BigQuery: use "googleApi" (service account) instead of "googleBigQueryOAuth2Api"
+          - Google Sheets: use "googleSheetsServiceAccountApi" instead of "googleSheetsOAuth2Api"
+          - Google Drive: use "googleDriveServiceAccountApi" instead of "googleDriveOAuth2Api"
+          - Other Google nodes: check if a service account variant exists (typically named "<serviceName>ServiceAccountApi")
 
        Output a JSON object with this structure:
        {
@@ -136,7 +179,7 @@ export const engineerNode = async (state: typeof TeamState.State) => {
     }
 
     if (result.workflows && Array.isArray(result.workflows)) {
-      result.workflows = result.workflows.map((wf: any) => aiService.fixHallucinatedNodes(wf));
+      result.workflows = result.workflows.map((wf: any) => aiService.wireOrphanedErrorHandlers(aiService.fixHallucinatedNodes(wf)));
     }
 
     return {

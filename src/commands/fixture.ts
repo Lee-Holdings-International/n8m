@@ -244,13 +244,35 @@ export default class Fixture extends Command {
     }
 
     const fixtureManager = new FixtureManager()
-    const fixturePath = path.join(process.cwd(), '.n8m', 'fixtures', `${resolvedId}.json`)
+
+    const defaultName = latest.status === 'success' ? 'happy-path' : 'error-case'
+    const { fixtureName } = await inquirer.prompt([{
+      type: 'input',
+      name: 'fixtureName',
+      message: 'Name this fixture (e.g. happy-path, missing-field, bad-auth):',
+      default: defaultName,
+    }])
+
+    const { expectedOutcome } = await inquirer.prompt([{
+      type: 'select',
+      name: 'expectedOutcome',
+      message: 'Expected test outcome for this case:',
+      choices: [
+        { name: 'pass  — execution should succeed', value: 'pass' },
+        { name: 'fail  — execution should fail (testing error handling)', value: 'fail' },
+      ],
+      default: latest.status === 'success' ? 'pass' : 'fail',
+    }])
+
+    const fixtureDir = path.join(process.cwd(), '.n8m', 'fixtures', resolvedId)
+    const safeName = (fixtureName as string).replace(/[^a-z0-9_-]/gi, '-').replace(/-+/g, '-').toLowerCase()
+    const fixturePath = path.join(fixtureDir, `${safeName}.json`)
 
     if (existsSync(fixturePath)) {
       const { overwrite } = await inquirer.prompt([{
         type: 'confirm',
         name: 'overwrite',
-        message: `Fixture already exists for workflow ${resolvedId}. Overwrite?`,
+        message: `Fixture "${safeName}" already exists. Overwrite?`,
         default: true,
       }])
       if (!overwrite) {
@@ -259,11 +281,13 @@ export default class Fixture extends Command {
       }
     }
 
-    await fixtureManager.save({
+    await fixtureManager.saveNamed({
       version: '1.0',
       capturedAt: new Date().toISOString(),
       workflowId: resolvedId,
       workflowName: resolvedName ?? resolvedId,
+      description: fixtureName as string,
+      expectedOutcome: expectedOutcome as 'pass' | 'fail',
       workflow,
       execution: {
         id: fullExec.id,
@@ -276,15 +300,17 @@ export default class Fixture extends Command {
           },
         },
       },
-    })
+    }, safeName)
 
     const nodeCount = Object.keys(fullExec.data?.resultData?.runData ?? {}).length
-    this.log(theme.success(`Fixture saved to .n8m/fixtures/${resolvedId}.json`))
+    this.log(theme.success(`Fixture saved to .n8m/fixtures/${resolvedId}/${safeName}.json`))
     this.log(theme.muted(`  Workflow: ${resolvedName}`))
     this.log(theme.muted(`  Execution: ${fullExec.status} · ${nodeCount} node(s) captured`))
+    this.log(theme.muted(`  Expected outcome: ${expectedOutcome}`))
     this.log('')
-    this.log(theme.muted('  To test with this fixture:'))
-    this.log(theme.muted(`    n8m test --fixture .n8m/fixtures/${resolvedId}.json`))
-    this.log(theme.muted(`  Or just run: n8m test  (auto-detected by workflow ID)`))
+    this.log(theme.muted('  To run this fixture:'))
+    this.log(theme.muted(`    n8m test --fixture .n8m/fixtures/${resolvedId}/${safeName}.json`))
+    this.log(theme.muted('  To run all fixtures for this workflow:'))
+    this.log(theme.muted(`    n8m test --fixture .n8m/fixtures/${resolvedId}`))
   }
 }

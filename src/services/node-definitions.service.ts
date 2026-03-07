@@ -16,6 +16,8 @@ export interface ReducedNodeDefinition {
 
 export class NodeDefinitionsService {
     private static instance: NodeDefinitionsService;
+    /** Override candidate dirs for testing only. When set, replaces the default dir list in searchPatterns(). */
+    static _testPatternsDirs: string[] | null = null;
     private definitions: any[] = [];
     private client: N8nClient;
     private defaultClient: N8nClient;
@@ -155,6 +157,48 @@ export class NodeDefinitionsService {
                 typeOptions: p.typeOptions
             }))
         };
+    }
+
+    /**
+     * Search pattern library for examples matching the query.
+     * Patterns are markdown files in docs/patterns/ with a keywords frontmatter line.
+     * Format: <!-- keywords: bigquery, http, google -->
+     */
+    public searchPatterns(query: string): string[] {
+        const lowerQuery = query.toLowerCase();
+        const terms = lowerQuery.split(/\s+/).filter(t => t.length > 2);
+        if (terms.length === 0) return [];
+
+        // Search order: user's .n8m/patterns first, then built-in docs/patterns
+        const candidateDirs: string[] = NodeDefinitionsService._testPatternsDirs ?? [
+            path.join(process.cwd(), '.n8m', 'patterns'),
+            path.join(__dirname, '..', '..', 'docs', 'patterns'),       // dist
+            path.join(__dirname, '..', '..', '..', 'docs', 'patterns'), // src (dev)
+        ];
+
+        const matched: string[] = [];
+        const seen = new Set<string>(); // deduplicate by filename
+
+        for (const dir of candidateDirs) {
+            if (!fs.existsSync(dir)) continue;
+            try {
+                const files = fs.readdirSync(dir).filter(f => f.endsWith('.md'));
+                for (const file of files) {
+                    if (seen.has(file)) continue; // user pattern overrides built-in of same name
+                    const content = fs.readFileSync(path.join(dir, file), 'utf-8');
+                    const keywordsMatch = content.match(/<!--\s*keywords:\s*([^-]+)-->/i);
+                    if (!keywordsMatch) continue;
+                    seen.add(file);
+                    const fileKeywords = keywordsMatch[1].toLowerCase();
+                    if (terms.some(t => fileKeywords.includes(t))) {
+                        matched.push(content);
+                    }
+                }
+            } catch {
+                // silently skip unreadable dirs
+            }
+        }
+        return matched;
     }
 
     /**

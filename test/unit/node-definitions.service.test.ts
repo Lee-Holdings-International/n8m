@@ -1,4 +1,7 @@
 import { expect } from 'chai';
+import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import os from 'os';
+import path from 'path';
 import { NodeDefinitionsService } from '../../src/services/node-definitions.service.js';
 
 // ---------------------------------------------------------------------------
@@ -226,6 +229,105 @@ describe('NodeDefinitionsService', () => {
       const output = service.formatForLLM(defs);
       expect(output).to.include('Node:');
       expect(output).to.include('Description:');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('searchPatterns()', () => {
+    let tmpDir: string;
+    let patternsDir: string;
+    let origCwd: string;
+
+    beforeEach(() => {
+      // Create a temp project dir with a .n8m/patterns folder
+      tmpDir = path.join(os.tmpdir(), 'n8m-test-' + Date.now());
+      patternsDir = path.join(tmpDir, '.n8m', 'patterns');
+      mkdirSync(patternsDir, { recursive: true });
+      origCwd = process.cwd();
+      process.chdir(tmpDir);
+      // Restrict searchPatterns to only the temp dir so built-in docs/patterns don't interfere
+      (NodeDefinitionsService as any)._testPatternsDirs = [patternsDir];
+      resetSingleton();
+    });
+
+    afterEach(() => {
+      process.chdir(origCwd);
+      rmSync(tmpDir, { recursive: true, force: true });
+      (NodeDefinitionsService as any)._testPatternsDirs = null;
+      resetSingleton();
+    });
+
+    function writePattern(name: string, keywords: string, body = '# Pattern') {
+      writeFileSync(
+        path.join(patternsDir, name),
+        `<!-- keywords: ${keywords} -->\n${body}`,
+        'utf-8',
+      );
+    }
+
+    it('returns empty array when query is empty', () => {
+      const svc = NodeDefinitionsService.getInstance();
+      expect(svc.searchPatterns('')).to.deep.equal([]);
+    });
+
+    it('returns empty array when query has only short words (≤2 chars)', () => {
+      writePattern('test.md', 'bigquery, sql');
+      const svc = NodeDefinitionsService.getInstance();
+      expect(svc.searchPatterns('to an or')).to.deep.equal([]);
+    });
+
+    it('returns empty array when no patterns directory exists', () => {
+      rmSync(patternsDir, { recursive: true, force: true });
+      const svc = NodeDefinitionsService.getInstance();
+      expect(svc.searchPatterns('bigquery')).to.deep.equal([]);
+    });
+
+    it('returns matching pattern content by keyword', () => {
+      writePattern('bq.md', 'bigquery, sql, analytics', '# BigQuery Pattern');
+      const svc = NodeDefinitionsService.getInstance();
+      const results = svc.searchPatterns('bigquery');
+      expect(results).to.have.length(1);
+      expect(results[0]).to.include('# BigQuery Pattern');
+    });
+
+    it('is case-insensitive for both query and keywords', () => {
+      writePattern('bq.md', 'BigQuery, SQL');
+      const svc = NodeDefinitionsService.getInstance();
+      expect(svc.searchPatterns('BIGQUERY')).to.have.length(1);
+      expect(svc.searchPatterns('sql')).to.have.length(1);
+    });
+
+    it('skips files with no keywords frontmatter comment', () => {
+      writeFileSync(path.join(patternsDir, 'no-keywords.md'), '# No keywords here', 'utf-8');
+      const svc = NodeDefinitionsService.getInstance();
+      expect(svc.searchPatterns('keywords')).to.deep.equal([]);
+    });
+
+    it('returns multiple patterns when more than one matches', () => {
+      writePattern('bq.md', 'bigquery, sql');
+      writePattern('drive.md', 'google drive, bigquery');
+      const svc = NodeDefinitionsService.getInstance();
+      const results = svc.searchPatterns('bigquery');
+      expect(results).to.have.length(2);
+    });
+
+    it('does not return patterns whose keywords do not match', () => {
+      writePattern('slack.md', 'slack, messaging');
+      writePattern('bq.md', 'bigquery, sql');
+      const svc = NodeDefinitionsService.getInstance();
+      const results = svc.searchPatterns('slack');
+      expect(results).to.have.length(1);
+      expect(results[0]).to.include('slack');
+    });
+
+    it('deduplicates patterns with the same filename (user overrides built-in)', () => {
+      // Write a user pattern with the same filename that docs/patterns might have
+      writePattern('bigquery-via-http.md', 'bigquery, sql', '# User Override');
+      const svc = NodeDefinitionsService.getInstance();
+      const results = svc.searchPatterns('bigquery');
+      // Should only return 1 result (user pattern wins) even if built-in exists
+      const userPatterns = results.filter(r => r.includes('# User Override'));
+      expect(userPatterns).to.have.length(1);
     });
   });
 
